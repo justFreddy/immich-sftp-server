@@ -366,14 +366,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
 
         // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => ({
-            id: asset.id,
-            originalFileName: asset.originalFileName,
-            fileCreatedAt: asset.fileCreatedAt,
-            fileModifiedAt: asset.fileModifiedAt,
-            fileSizeInByte: asset.exifInfo.fileSizeInByte,
-            isTrashed: asset.isTrashed,
-        }));
+        album.assets = response.assets.map((asset: any): ImmichAsset => {
+            
+            if (!asset.exifInfo?.fileSizeInByte) {
+                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);                
+            }
+
+            return{
+                id: asset.id,
+                originalFileName: asset.originalFileName,
+                fileCreatedAt: asset.fileCreatedAt,
+                fileModifiedAt: asset.fileModifiedAt,
+                fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
+                isTrashed: asset.isTrashed,
+            }
+        });
     }
     private extractPathInfo(filePath: string): { albumName: string; fileName: string | null } {
         // Entfernt führende und doppelte Slashes, z. B. aus "//Pflanzen/..." → "Pflanzen/..."
