@@ -174,9 +174,7 @@ class ImmichFtpFileSystem extends FileSystem {
 export class FtpProtocolServer implements TransferProtocolServer {
   readonly name = 'ftp';
 
-  private readonly ftpServer = new FtpSrv({
-    url: `ftp://${config.listenHost}:${config.ftpPort}`,
-  });
+  private readonly ftpServer = new FtpSrv(buildFtpServerOptions());
 
   private readonly backendByConnectionId = new Map<string, VirtualFileSystem>();
 
@@ -212,6 +210,29 @@ export class FtpProtocolServer implements TransferProtocolServer {
     await this.ftpServer.listen();
     console.log(`FTP server listening on ${config.listenHost}:${config.ftpPort}`);
   }
+}
+
+type FtpServerOptions = {
+  url: string;
+  pasv_url?: string;
+  pasv_min?: number;
+  pasv_max?: number;
+};
+
+export function buildFtpServerOptions(): FtpServerOptions {
+  const options: FtpServerOptions = {
+    url: `ftp://${config.listenHost}:${config.ftpPort}`,
+  };
+
+  if (config.ftpPassiveHost) {
+    options.pasv_url = config.ftpPassiveHost;
+  }
+  if (config.ftpPassivePortMin != null && config.ftpPassivePortMax != null) {
+    options.pasv_min = config.ftpPassivePortMin;
+    options.pasv_max = config.ftpPassivePortMax;
+  }
+
+  return options;
 }
 
 function normalizePath(inputPath: string, currentDir: string): string {

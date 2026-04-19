@@ -112,6 +112,7 @@ services:
  +   ports:
  +    - "22832:22" # SFTP
  +    - "22100:21" # FTP
+ +    - "30000-30010:30000-30010" # FTP passive data ports (optional, if passive mode is enabled)
  +   environment:
  +     IMMICH_HOST: http://immich-server:2283
  +     TZ: Europe/Berlin
@@ -119,6 +120,9 @@ services:
  +     ENABLE_FTP: "false"
  +     SFTP_PORT: "22"
  +     FTP_PORT: "21"
+ +     FTP_PASSIVE_HOST: "your.public.hostname"
+ +     FTP_PASSIVE_PORT_MIN: "30000"
+ +     FTP_PASSIVE_PORT_MAX: "30010"
  +     LISTEN_HOST: "0.0.0.0"
  +   restart: unless-stopped
 
@@ -137,6 +141,7 @@ services:
     ports:
       - "22832:22" # SFTP
       - "22100:21" # FTP
+      - "30000-30010:30000-30010" # FTP passive data ports (optional, if passive mode is enabled)
     environment:
       IMMICH_HOST: https://<your-immich-server-fqdn>:<immich-port>
       TZ: <your TZ>
@@ -144,6 +149,9 @@ services:
       ENABLE_FTP: "false"
       SFTP_PORT: "22"
       FTP_PORT: "21"
+      FTP_PASSIVE_HOST: "your.public.hostname"
+      FTP_PASSIVE_PORT_MIN: "30000"
+      FTP_PASSIVE_PORT_MAX: "30010"
       LISTEN_HOST: "0.0.0.0"
     restart: unless-stopped
 ```
@@ -156,6 +164,8 @@ services:
 - `ENABLE_FTP` (default: `false`) – enable/disable FTP server
 - `SFTP_PORT` (default: `22`) – internal SFTP listen port
 - `FTP_PORT` (default: `21`) – internal FTP listen port
+- `FTP_PASSIVE_HOST` (optional) – hostname or public IP returned to FTP clients for passive mode
+- `FTP_PASSIVE_PORT_MIN` / `FTP_PASSIVE_PORT_MAX` (optional) – passive FTP data port range; set both or neither
 - `LISTEN_HOST` (default: `0.0.0.0`) – bind address for both servers
 
 ### Connect / Test it ✅
