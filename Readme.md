@@ -47,7 +47,7 @@ The file list you see is completely built from the metadata stored in Immich:
 Each album folder also contains:
 
 - `album.yaml`: album settings + metadata (id, owner, shared users/roles, links, etc.)
-- `immich.url`: browser shortcut to open the album in Immich
+- `immich.html`: HTML redirect file to open the album in Immich in a browser
 
 `album.yaml` is validated against `schemas/album.yaml.schema.json`.
 If a user edits fields they are not allowed to change, save is blocked and an error is returned to the SFTP client.

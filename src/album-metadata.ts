@@ -1,7 +1,7 @@
 import YAML from 'yaml';
 
 export const ALBUM_METADATA_FILE_NAME = 'album.yaml';
-export const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
+export const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.html';
 
 const NOSYNC_TAG = '#nosync';
 const NOSYNC_TAG_REGEX = /(?:^|\s)#nosync(?:\s|$)/g;
@@ -89,7 +89,21 @@ export function buildAlbumMetadataYaml(album: AlbumMetadataAlbumInput, canEditSh
 }
 
 export function buildAlbumBrowserLink(baseUrl: string, albumId: string): string {
-    return `[InternetShortcut]\nURL=${baseUrl}/albums/${albumId}\n`;
+    const url = `${baseUrl}/albums/${albumId}`;
+    const safeUrl = escapeHtml(url);
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0;url=${safeUrl}">
+  <title>Open album in Immich</title>
+</head>
+<body>
+  <p>Opening album… If not redirected, <a href="${safeUrl}">click here</a>.</p>
+  <script>window.location.replace(${JSON.stringify(url)});</script>
+</body>
+</html>
+`;
 }
 
 export function parseAndValidateAlbumMetadataYaml(content: string): AlbumMetadataDocument {
@@ -217,4 +231,12 @@ function validateAlbumMetadataDocument(input: Record<string, unknown>): AlbumMet
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
