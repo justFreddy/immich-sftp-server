@@ -492,7 +492,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
             if (!asset.exifInfo?.fileSizeInByte) {
                 console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
             }
-
             return {
                 id: asset.id,
                 originalFileName: asset.originalFileName,
