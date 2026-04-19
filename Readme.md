@@ -38,8 +38,8 @@ Inside an album folder, files represent assets. Every asset you have added to an
 
 The file list you see is completely built from the metadata stored in Immich:
 
-- **Filename:** the `originalFileName` the asset had when it was uploaded to Immich
-- **Modified time:** datetime from the asset
+- **Filename:** configurable (original name, UUID-based, or date-based)
+- **Modified time:** from Immich server asset timestamps
 - **Size:** file size of the asset
 
 ### Album metadata files
@@ -76,7 +76,10 @@ Delete items from your SFTP/FTP client:
 
 ### Downloads 
 
-Any file can be downloaded from SFTP and you will get the file as it was originally uploaded to Immich.
+Any file can be downloaded from SFTP:
+
+- `original` mode: original file as uploaded to Immich
+- `preview` mode: generated smaller preview image from Immich
 
 ---
 
@@ -167,6 +170,26 @@ services:
 - `FTP_PASSIVE_HOST` (optional) – hostname or public IP returned to FTP clients for passive mode
 - `FTP_PASSIVE_PORT_MIN` / `FTP_PASSIVE_PORT_MAX` (optional) – passive FTP data port range; set both or neither
 - `LISTEN_HOST` (default: `0.0.0.0`) – bind address for both servers
+- `ASSET_FILENAME_PATTERN` (default: `original`) – one of:
+  - `original` → original filename
+  - `assetUuid`/`asset_uuid`/`uuid` → full asset UUID + original extension
+  - `shortUuid`/`short_uuid` → `img_<first8uuid>` + original extension
+  - `date` → `YYYYMMDD_HHMMSSmmm` + original extension
+  - `dateUuid`/`date_uuid` → `YYYYMMDD_HHMMSSmmm_<first8uuid>` + original extension
+- `ASSET_DOWNLOAD_SOURCE` (default: `original`) – `original` or `preview`
+- `SETTINGS_FILE` (default: `./immich-sftp-server.yaml`) – optional YAML settings file path
+
+### Optional YAML settings file (repository/container root)
+
+If `immich-sftp-server.yaml` exists in the working directory, it can define the same asset settings:
+
+```yaml
+asset:
+  fileNamePattern: short_uuid
+  downloadSource: preview
+```
+
+Environment variables still take precedence over YAML values.
 
 ### Connect / Test it ✅
 
