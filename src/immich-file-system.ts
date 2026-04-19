@@ -24,6 +24,17 @@ import {
     parseAndValidateAlbumMetadataYaml,
     sameSharedUsers
 } from './album-metadata';
+import {
+    applyAlbumDetails,
+    extractCurrentUser,
+    getAlbumMtime,
+    ImmichAlbumApiResponse,
+    ImmichAlbumBase,
+    ImmichAlbumUser,
+    ImmichUser,
+    isCurrentUserAlbumOwner,
+    mapAlbumFromApi
+} from './immich-album-helpers';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -48,7 +59,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         this.immichAccessToken = loginResp.accessToken;
 
         // Try to get current user from login response first
-        this.currentUser = this.extractCurrentUser(loginResp.user, username);
+        this.currentUser = extractCurrentUser(loginResp.user, username);
 
         // Fallback to users/me endpoint
         if (!this.currentUser?.id || !this.currentUser?.username) {
@@ -205,13 +216,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     name: ALBUM_METADATA_FILE_NAME,
                     isDir: false,
                     size: Buffer.byteLength(metadataContent, 'utf8'),
-                    mtime: this.getAlbumMtime(album),
+                    mtime: getAlbumMtime(album),
                 });
                 files.push({
                     name: ALBUM_BROWSER_LINK_FILE_NAME,
                     isDir: false,
                     size: Buffer.byteLength(linkContent, 'utf8'),
-                    mtime: this.getAlbumMtime(album),
+                    mtime: getAlbumMtime(album),
                 });
 
                 return files;
@@ -302,7 +313,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     return {
                         isDir: false,
                         size: Buffer.byteLength(metadata, 'utf8'),
-                        mtime: this.getAlbumMtime(album),
+                        mtime: getAlbumMtime(album),
                     };
                 }
 
@@ -310,7 +321,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return {
                     isDir: false,
                     size: Buffer.byteLength(link, 'utf8'),
-                    mtime: this.getAlbumMtime(album),
+                    mtime: getAlbumMtime(album),
                 };
             }
 
@@ -406,7 +417,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 logAction: 'Current user',
                 skipResponseLog: true,
             });
-            this.currentUser = this.extractCurrentUser(me, fallbackUsername);
+            this.currentUser = extractCurrentUser(me, fallbackUsername);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.warn(`Could not fetch current user (${errorMessage}), falling back to login username.`);
@@ -454,7 +465,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item): ImmichAlbum => this.mapAlbumFromApi(item as ImmichAlbumApiResponse));
+        const albums: ImmichAlbum[] = response.map((item): ImmichAlbum => mapAlbumFromApi(item as ImmichAlbumApiResponse));
 
         // Filter out albums whose description contains "#nosync"
         let filteredAlbums = albums.filter(album => !hasNoSyncTag(album.description));
@@ -484,7 +495,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             skipResponseLog: true,
         });
 
-        this.applyAlbumDetails(album, response);
+        applyAlbumDetails(album, response);
 
         // Convert to ImmichAsset
         album.assets = (response.assets ?? []).map((asset: any): ImmichAsset => {
@@ -627,7 +638,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             createdAt: album.createdAt,
             updatedAt: album.updatedAt,
             sharedUsers: album.albumUsers,
-        }, this.isCurrentUserAlbumOwner(album), this.baseUrl);
+        }, isCurrentUserAlbumOwner(album, this.currentUser), this.baseUrl);
     }
 
     private buildAlbumBrowserLink(album: ImmichAlbum): string {
@@ -645,7 +656,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             createdAt: album.createdAt,
             updatedAt: album.updatedAt,
             sharedUsers: album.albumUsers,
-        }, this.isCurrentUserAlbumOwner(album), this.baseUrl);
+        }, isCurrentUserAlbumOwner(album, this.currentUser), this.baseUrl);
 
         const changedImmutableFields = getChangedImmutableAlbumMetadataFields(current, metadata);
 
@@ -654,7 +665,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Only owner may edit metadata
-        if (!this.isCurrentUserAlbumOwner(album)) {
+        if (!isCurrentUserAlbumOwner(album, this.currentUser)) {
             throw new Error('Blocked save: only the album owner can edit album.yaml.');
         }
 
@@ -714,129 +725,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 role: user.role,
             };
         });
-    }
-
-    private isCurrentUserAlbumOwner(album: ImmichAlbum): boolean {
-        if (!this.currentUser) {
-            return false;
-        }
-
-        if (album.ownerId && this.currentUser.id && album.ownerId === this.currentUser.id) {
-            return true;
-        }
-
-        const currentCandidates = [this.currentUser.username, this.currentUser.email]
-            .filter((value): value is string => Boolean(value))
-            .map(value => value.toLowerCase());
-
-        const ownerCandidates = [album.ownerUsername, album.ownerEmail]
-            .filter((value): value is string => Boolean(value))
-            .map(value => value.toLowerCase());
-
-        return ownerCandidates.some(ownerCandidate => currentCandidates.includes(ownerCandidate));
-    }
-
-    private getAlbumMtime(album: ImmichAlbum): number {
-        const updatedTimestamp = album.updatedAt ? new Date(album.updatedAt).getTime() : NaN;
-        if (Number.isFinite(updatedTimestamp) && updatedTimestamp > 0) {
-            return Math.floor(updatedTimestamp / 1000);
-        }
-
-        const createdTimestamp = album.createdAt ? new Date(album.createdAt).getTime() : NaN;
-        if (Number.isFinite(createdTimestamp) && createdTimestamp > 0) {
-            return Math.floor(createdTimestamp / 1000);
-        }
-
-        console.warn(`Album '${album.albumName}' has missing/invalid createdAt and updatedAt timestamps, using current time as mtime fallback.`);
-        return Math.floor(Date.now() / 1000);
-    }
-
-    private extractCurrentUser(rawUser: unknown, fallbackUsername: string): ImmichUser {
-        if (!this.isObject(rawUser)) {
-            return {
-                id: '',
-                username: fallbackUsername,
-                email: fallbackUsername,
-            };
-        }
-
-        const usernameCandidate = this.extractUsername(rawUser) || fallbackUsername;
-        return {
-            id: String(rawUser.id ?? ''),
-            username: usernameCandidate,
-            email: String(rawUser.email ?? fallbackUsername),
-        };
-    }
-
-    private mapAlbumFromApi(item: ImmichAlbumApiResponse): ImmichAlbum {
-        const owner = this.isObject(item?.owner) ? item.owner : null;
-
-        return {
-            id: String(item.id),
-            albumName: String(item.albumName),
-            description: String(item.description ?? ''),
-            ownerId: owner ? String(owner.id ?? '') : String(item.ownerId ?? ''),
-            ownerUsername: owner ? this.extractUsername(owner) : String(item.ownerName ?? item.ownerEmail ?? ''),
-            ownerEmail: owner ? String(owner.email ?? '') : String(item.ownerEmail ?? ''),
-            createdAt: item.createdAt ? String(item.createdAt) : undefined,
-            updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
-            albumUsers: this.mapAlbumUsers(item.albumUsers),
-        };
-    }
-
-    private applyAlbumDetails(album: ImmichAlbum, details: unknown): void {
-        if (!this.isObject(details)) {
-            return;
-        }
-
-        const owner = this.isObject(details.owner) ? details.owner : null;
-
-        album.description = String(details.description ?? album.description ?? '');
-        album.ownerId = owner ? String(owner.id ?? album.ownerId ?? '') : String(details.ownerId ?? album.ownerId ?? '');
-        album.ownerUsername = owner ? this.extractUsername(owner) : String(details.ownerName ?? details.ownerEmail ?? album.ownerUsername ?? '');
-        album.ownerEmail = owner ? String(owner.email ?? album.ownerEmail ?? '') : String(details.ownerEmail ?? album.ownerEmail ?? '');
-        album.createdAt = details.createdAt ? String(details.createdAt) : album.createdAt;
-        album.updatedAt = details.updatedAt ? String(details.updatedAt) : album.updatedAt;
-        album.albumUsers = this.mapAlbumUsers(details.albumUsers);
-    }
-
-    private mapAlbumUsers(rawAlbumUsers: unknown): ImmichAlbumUser[] {
-        if (!Array.isArray(rawAlbumUsers)) {
-            return [];
-        }
-
-        return rawAlbumUsers
-            .map((albumUser: unknown): ImmichAlbumUser | null => {
-                if (!this.isObject(albumUser)) {
-                    return null;
-                }
-
-                const userRaw = this.isObject(albumUser.user) ? albumUser.user : albumUser;
-                if (!this.isObject(userRaw)) {
-                    return null;
-                }
-
-                const userId = String(userRaw.id ?? albumUser.userId ?? '').trim();
-                const username = this.extractUsername(userRaw);
-                if (!userId || !username) {
-                    return null;
-                }
-
-                return {
-                    userId,
-                    username,
-                    role: String(albumUser.role ?? 'viewer'),
-                };
-            })
-            .filter((entry): entry is ImmichAlbumUser => entry !== null);
-    }
-
-    private extractUsername(user: Record<string, unknown>): string {
-        return String(user.name ?? user.username ?? user.email ?? user.id ?? '').trim();
-    }
-
-    private isObject(value: unknown): value is Record<string, unknown> {
-        return typeof value === 'object' && value !== null && !Array.isArray(value);
     }
 
     // Remove trailing slashes from the Immich host URL
@@ -906,29 +794,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
 
 //Data Classes
-interface ImmichAlbum {
-    id: string;
-    albumName: string;
-    description: string;
-    ownerId?: string;
-    ownerUsername?: string;
-    ownerEmail?: string;
-    createdAt?: string;
-    updatedAt?: string;
-    albumUsers?: ImmichAlbumUser[];
+interface ImmichAlbum extends ImmichAlbumBase {
     assets?: ImmichAsset[];
-}
-
-interface ImmichAlbumUser {
-    userId: string;
-    username: string;
-    role: string;
-}
-
-interface ImmichUser {
-    id: string;
-    username: string;
-    email?: string;
 }
 
 interface ImmichAsset {
@@ -938,17 +805,4 @@ interface ImmichAsset {
     fileModifiedAt: string;
     fileSizeInByte: number;
     isTrashed: boolean;
-}
-
-interface ImmichAlbumApiResponse {
-    id: string;
-    albumName: string;
-    description?: string;
-    owner?: Record<string, unknown>;
-    ownerId?: string;
-    ownerName?: string;
-    ownerEmail?: string;
-    createdAt?: string;
-    updatedAt?: string;
-    albumUsers?: unknown[];
 }
