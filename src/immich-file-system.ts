@@ -439,22 +439,32 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
+        const [ownAlbumsResponse, sharedAlbumsResponse] = await Promise.all([
+            this.immichRequest({
+                method: 'GET',
+                endpoint: 'albums',
+                logAction: 'All own albums',
+                skipResponseLog: true,
+            }),
+            this.immichRequest({
+                method: 'GET',
+                endpoint: 'albums?shared=true',
+                logAction: 'All shared albums',
+                skipResponseLog: true,
+            }),
+        ]);
 
-        //Parameter "shaerd":
-        // - not set: All albums owned by me, also when shared with other users
-        // - false: only own albums, that are not shared with other users
-        // - true: only shared albums, own and from other users shared with me
+        const ownAlbums = Array.isArray(ownAlbumsResponse) ? ownAlbumsResponse : [];
+        const sharedAlbums = Array.isArray(sharedAlbumsResponse) ? sharedAlbumsResponse : [];
+        const combinedByAlbumId = new Map<string, unknown>();
 
-        // Fetch albums from Immich API
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: 'albums',
-            logAction: 'All own albums',
-            skipResponseLog: true,
-        });
+        for (const album of [...ownAlbums, ...sharedAlbums]) {
+            if (album && typeof album === 'object' && 'id' in album) {
+                combinedByAlbumId.set(String((album as { id: unknown }).id), album);
+            }
+        }
 
-        //Process and filter albums
-        return this.filterAlbums(response);
+        return this.filterAlbums(Array.from(combinedByAlbumId.values()));
     }
     private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
         // Check in which albums the asset is used

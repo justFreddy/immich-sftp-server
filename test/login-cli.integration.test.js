@@ -98,7 +98,7 @@ async function startMockImmichServer() {
         return;
       }
 
-      if (req.method === 'GET' && req.url === '/api/albums') {
+      if (req.method === 'GET' && (req.url === '/api/albums' || req.url === '/api/albums?shared=true')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end('[]');
         return;
