@@ -705,6 +705,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     private getAssetMtime(asset: ImmichAsset): number {
+        // Prefer Immich server-maintained timestamps first, then fall back to uploaded file timestamps.
         const candidates = [asset.updatedAt, asset.createdAt, asset.fileModifiedAt, asset.fileCreatedAt];
         for (const value of candidates) {
             const timestamp = value ? new Date(value).getTime() : NaN;
@@ -745,7 +746,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private buildPreferredAssetName(asset: ImmichAsset): string {
         const extension = path.extname(asset.originalFileName);
         const timestamp = this.getAssetMtime(asset);
-        const datePart = DateTime.fromSeconds(timestamp, { zone: config.TZ }).toFormat('yyyyLLdd_HHmmssSSS');
+        const timestampPart = DateTime.fromSeconds(timestamp, { zone: config.TZ }).toFormat('yyyyLLdd_HHmmssSSS');
         const shortId = asset.id.slice(0, 8);
 
         switch (config.assetFileNamePattern) {
@@ -754,9 +755,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
             case 'shortUuid':
                 return `img_${shortId}${extension}`;
             case 'date':
-                return `${datePart}${extension}`;
+                return `${timestampPart}${extension}`;
             case 'dateUuid':
-                return `${datePart}_${shortId}${extension}`;
+                return `${timestampPart}_${shortId}${extension}`;
             case 'original':
             default:
                 return asset.originalFileName;

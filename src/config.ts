@@ -165,6 +165,7 @@ export const config = (() => {
     throw new Error('FTP_PASSIVE_PORT_MIN must be less than or equal to FTP_PASSIVE_PORT_MAX.');
   }
 
+  // Support both top-level and nested keys to keep settings flexible and backward compatible.
   const yamlFileNamePattern = parseAssetFileNamePattern(
     getOptionalNestedString(yamlSettings, ['assetFileNamePattern']) ?? getOptionalNestedString(yamlSettings, ['asset', 'fileNamePattern']),
     'settings file',
