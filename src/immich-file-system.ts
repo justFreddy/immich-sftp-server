@@ -397,7 +397,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
     }
 
-    //Find albums and assets
+    // Find albums and assets
     private async fetchCurrentUser(fallbackUsername: string): Promise<void> {
         try {
             const me = await this.immichRequest({
