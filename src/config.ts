@@ -189,6 +189,8 @@ export const config = (() => {
     ftpPassivePortMax,
     enableSftp: getEnvBoolean('ENABLE_SFTP', true),
     enableFtp: getEnvBoolean('ENABLE_FTP', false),
+    enableSmb: getEnvBoolean('ENABLE_SMB', false),
+    enableWebdav: getEnvBoolean('ENABLE_WEBDAV', false),
     assetFileNamePattern: envFileNamePattern ?? yamlFileNamePattern ?? 'original',
     assetDownloadSource: envDownloadSource ?? yamlDownloadSource ?? 'original',
   };

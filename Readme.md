@@ -121,6 +121,8 @@ services:
  +     TZ: Europe/Berlin
  +     ENABLE_SFTP: "true"
  +     ENABLE_FTP: "false"
+ +     ENABLE_SMB: "false"
+ +     ENABLE_WEBDAV: "false"
  +     SFTP_PORT: "22"
  +     FTP_PORT: "21"
  +     FTP_PASSIVE_HOST: "your.public.hostname"
@@ -150,6 +152,8 @@ services:
       TZ: <your TZ>
       ENABLE_SFTP: "true"
       ENABLE_FTP: "false"
+      ENABLE_SMB: "false"
+      ENABLE_WEBDAV: "false"
       SFTP_PORT: "22"
       FTP_PORT: "21"
       FTP_PASSIVE_HOST: "your.public.hostname"
@@ -165,6 +169,8 @@ services:
 - `TZ` (default: `UTC`) – timezone used for metadata timestamps (for example `Europe/Berlin`)
 - `ENABLE_SFTP` (default: `true`) – enable/disable SFTP server
 - `ENABLE_FTP` (default: `false`) – enable/disable FTP server
+- `ENABLE_SMB` (default: `false`) – enable/disable SMB server (currently not implemented)
+- `ENABLE_WEBDAV` (default: `false`) – enable/disable WebDAV server (currently not implemented)
 - `SFTP_PORT` (default: `22`) – internal SFTP listen port
 - `FTP_PORT` (default: `21`) – internal FTP listen port
 - `FTP_PASSIVE_HOST` (optional) – hostname or public IP returned to FTP clients for passive mode

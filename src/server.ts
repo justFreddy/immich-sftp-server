@@ -8,6 +8,13 @@ async function startServers(): Promise<void> {
   ]);
   const servers: TransferProtocolServer[] = [];
 
+  if (config.enableSmb) {
+    throw new Error('SMB is not implemented yet. Set ENABLE_SMB to false.');
+  }
+  if (config.enableWebdav) {
+    throw new Error('WebDAV is not implemented yet. Set ENABLE_WEBDAV to false.');
+  }
+
   if (config.enableSftp) {
     servers.push(new SftpProtocolServer());
   }
@@ -16,7 +23,7 @@ async function startServers(): Promise<void> {
   }
 
   if (servers.length === 0) {
-    throw new Error('No transfer protocol enabled. Set ENABLE_SFTP and/or ENABLE_FTP (accepted values: true/1/yes/on or false/0/no/off).');
+    throw new Error('No transfer protocol enabled. Set ENABLE_SFTP and/or ENABLE_FTP (accepted values: true/1/yes/on or false/0/no/off). ENABLE_SMB and ENABLE_WEBDAV are available but currently not implemented.');
   }
 
   await Promise.all(servers.map((server) => server.start()));

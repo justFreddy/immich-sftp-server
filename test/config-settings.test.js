@@ -11,6 +11,8 @@ function readConfig(extraEnv = {}, cwd = path.resolve(__dirname, '..')) {
   const script = `
 const { config } = require(${JSON.stringify(configModulePath)});
 process.stdout.write(JSON.stringify({
+  enableSmb: config.enableSmb,
+  enableWebdav: config.enableWebdav,
   assetFileNamePattern: config.assetFileNamePattern,
   assetDownloadSource: config.assetDownloadSource
 }));
@@ -36,6 +38,8 @@ test('asset settings can be read from root YAML file', (t) => {
 
   const config = readConfig({}, tmpDir);
   assert.deepEqual(config, {
+    enableSmb: false,
+    enableWebdav: false,
     assetFileNamePattern: 'shortUuid',
     assetDownloadSource: 'preview',
   });
@@ -52,9 +56,13 @@ test('environment variables override YAML asset settings', (t) => {
   const config = readConfig({
     ASSET_FILENAME_PATTERN: 'date_uuid',
     ASSET_DOWNLOAD_SOURCE: 'preview',
+    ENABLE_SMB: 'true',
+    ENABLE_WEBDAV: '1',
   }, tmpDir);
 
   assert.deepEqual(config, {
+    enableSmb: true,
+    enableWebdav: true,
     assetFileNamePattern: 'dateUuid',
     assetDownloadSource: 'preview',
   });
