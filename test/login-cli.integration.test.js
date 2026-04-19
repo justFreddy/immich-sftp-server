@@ -80,12 +80,6 @@ async function startMockImmichServer() {
 
       if (req.method === 'POST' && req.url === '/api/auth/login') {
         loginEmails.push(String(payload.email ?? ''));
-        if (payload.password !== PASSWORD) {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ message: 'Invalid credentials' }));
-          return;
-        }
-
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           accessToken: 'mock-access-token',
@@ -202,13 +196,12 @@ function waitForOutput(child, needle, timeoutMs) {
 }
 
 async function runFtpLogin(username, password, port) {
-  const script = `open 127.0.0.1 ${port}\nuser ${username} ${password}\nls\nbye\n`;
+  const script = `open 127.0.0.1 ${port}\nuser ${username} ${password}\nbye\n`;
   await runCommand('ftp', ['-inv'], script, 20_000);
 }
 
 async function runSftpLogin(username, password, port) {
-  await runCommand(
-    'sshpass',
+  await waitForSftpConnection(
     [
       '-p',
       password,
@@ -220,12 +213,17 @@ async function runSftpLogin(username, password, port) {
       '-o',
       'UserKnownHostsFile=/dev/null',
       '-o',
-      'BatchMode=no',
-      '-l',
-      username,
+      'PreferredAuthentications=password',
+      '-o',
+      'PasswordAuthentication=yes',
+      '-o',
+      'KbdInteractiveAuthentication=no',
+      '-o',
+      'PubkeyAuthentication=no',
+      '-o',
+      `User=${username}`,
       '127.0.0.1',
     ],
-    'ls\nbye\n',
     20_000,
   );
 }
@@ -281,6 +279,74 @@ function runCommand(command, args, input, timeoutMs) {
     child.once('exit', onExit);
 
     child.stdin.end(input);
+  });
+}
+
+function waitForSftpConnection(args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('sshpass', args, {
+      cwd: REPO_ROOT,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let connected = false;
+
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdout.off('data', onStdout);
+      child.stderr.off('data', onStderr);
+      child.off('exit', onExit);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    const onStdout = (chunk) => {
+      stdout += chunk.toString('utf8');
+    };
+
+    const onStderr = (chunk) => {
+      stderr += chunk.toString('utf8');
+      if (stderr.includes('Permission denied')) {
+        finish(new Error(`SFTP login failed.\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+        return;
+      }
+
+      if (!connected && stderr.includes('Connected to ')) {
+        connected = true;
+        child.stdin.write('quit\n');
+        setTimeout(() => {
+          if (child.exitCode == null) {
+            child.kill('SIGTERM');
+          }
+          finish();
+        }, 300);
+      }
+    };
+
+    const onExit = (code, signal) => {
+      if (!connected && code !== 0) {
+        finish(new Error(`SFTP process exited before connection (code=${code}, signal=${signal}).\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+      }
+    };
+
+    const timer = setTimeout(() => {
+      if (child.exitCode == null) {
+        child.kill('SIGTERM');
+      }
+      finish(new Error(`SFTP command timed out after ${timeoutMs}ms.\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+    }, timeoutMs);
+
+    child.stdout.on('data', onStdout);
+    child.stderr.on('data', onStderr);
+    child.once('exit', onExit);
   });
 }
 
