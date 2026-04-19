@@ -1,6 +1,6 @@
-# Immich SFTP Server
+# Immich SFTP/FTP Server
 
-An **SFTP “bridge” for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP Client.
+An **SFTP/FTP “bridge” for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP or FTP client.
 
 ## Ideas to use this 💡
 
@@ -24,13 +24,13 @@ It also allows me to do most of the photo sorting on the phone, which is then re
 
 ---
 
-## How it works (Immich ↔ SFTP mapping) ⚙️
+## How it works (Immich ↔ SFTP/FTP mapping) ⚙️
 
 ### Albums → folders
 
 - Root (`/`) lists the albums the user has in Immich.
-- Creating a new folder in SFTP will create a new album in Immich.
-- Add `#nosync` somewhere into an album description in Immich to hide it from SFTP.
+- Creating a new folder in SFTP/FTP will create a new album in Immich.
+- Add `#nosync` somewhere into an album description in Immich to hide it from SFTP/FTP.
 
 ### Assets → files
 
@@ -66,7 +66,7 @@ Uploading files to SFTP is handled by the following rules:
 
 ### Deleting 
 
-Delete items from your SFTP client:
+Delete items from your SFTP/FTP client:
 
 - **Delete a file**:
   - if the asset is **only in this album** → it is moved to the **Immich trash**
@@ -81,6 +81,8 @@ Any file can be downloaded from SFTP and you will get the file as it was origina
 ---
 
 ## Deployment (Docker Compose) 🐳
+
+You can run both protocols in parallel. SFTP and FTP can be enabled/disabled independently with environment variables.
 
 ### Install on the Immich stack (recommended)
 
@@ -107,12 +109,18 @@ services:
 + immich-sftp:
 +   container_name: immich_sftp
 +   image: ghcr.io/demian98/immich-sftp-server:latest 
-+   ports:
-+    - "22832:22"
-+   environment:
-+     IMMICH_HOST: http://immich-server:2283
-+     TZ: Europe/Berlin
-+   restart: unless-stopped
+ +   ports:
+ +    - "22832:22" # SFTP
+ +    - "22100:21" # FTP
+ +   environment:
+ +     IMMICH_HOST: http://immich-server:2283
+ +     TZ: Europe/Berlin
+ +     ENABLE_SFTP: "true"
+ +     ENABLE_FTP: "false"
+ +     SFTP_PORT: "22"
+ +     FTP_PORT: "21"
+ +     LISTEN_HOST: "0.0.0.0"
+ +   restart: unless-stopped
 
 volumes:
   [...]
@@ -127,12 +135,26 @@ services:
     container_name: immich_sftp
     image: ghcr.io/demian98/immich-sftp-server:latest 
     ports:
-      - "22832:22"
+      - "22832:22" # SFTP
+      - "22100:21" # FTP
     environment:
       IMMICH_HOST: https://<your-immich-server-fqdn>:<immich-port>
       TZ: <your TZ>
+      ENABLE_SFTP: "true"
+      ENABLE_FTP: "false"
+      SFTP_PORT: "22"
+      FTP_PORT: "21"
+      LISTEN_HOST: "0.0.0.0"
     restart: unless-stopped
 ```
+
+### Environment variables
+
+- `ENABLE_SFTP` (default: `true`) – enable/disable SFTP server
+- `ENABLE_FTP` (default: `false`) – enable/disable FTP server
+- `SFTP_PORT` (default: `22`) – internal SFTP listen port
+- `FTP_PORT` (default: `21`) – internal FTP listen port
+- `LISTEN_HOST` (default: `0.0.0.0`) – bind address for both servers
 
 ### Connect / Test it ✅
 
@@ -140,6 +162,13 @@ Use any SFTP client:
 
 - **Host:** your server hostname/IP
 - **Port:** `22832` (from the compose example)
+- **Username:** your Immich email
+- **Password:** your Immich password
+
+Or use an FTP client if FTP is enabled:
+
+- **Host:** your server hostname/IP
+- **Port:** `22100` (from the compose example)
 - **Username:** your Immich email
 - **Password:** your Immich password
 
