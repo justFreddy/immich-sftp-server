@@ -55,7 +55,7 @@ export function isCurrentUserAlbumOwner(album: ImmichAlbumBase, currentUser: Imm
     return ownerCandidates.some(ownerCandidate => currentCandidates.includes(ownerCandidate));
 }
 
-export function getAlbumMtime(album: Pick<ImmichAlbumBase, 'albumName' | 'createdAt' | 'updatedAt'>): number {
+export function getAlbumMtime(album: Pick<ImmichAlbumBase, 'id' | 'albumName' | 'createdAt' | 'updatedAt'>): number {
     const updatedTimestamp = album.updatedAt ? new Date(album.updatedAt).getTime() : NaN;
     if (Number.isFinite(updatedTimestamp) && updatedTimestamp > 0) {
         return Math.floor(updatedTimestamp / 1000);
@@ -66,7 +66,7 @@ export function getAlbumMtime(album: Pick<ImmichAlbumBase, 'albumName' | 'create
         return Math.floor(createdTimestamp / 1000);
     }
 
-    console.warn(`Album '${album.albumName}' has missing/invalid createdAt and updatedAt timestamps, using current time as mtime fallback.`);
+    console.warn(`Album '${album.albumName}' (ID: ${album.id}) has missing/invalid createdAt and updatedAt timestamps, using current time as mtime fallback.`);
     return Math.floor(Date.now() / 1000);
 }
 

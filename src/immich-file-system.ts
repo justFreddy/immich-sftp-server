@@ -460,7 +460,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     private filterAlbums(response: unknown) {
         if (!Array.isArray(response)) {
-            console.warn('Unexpected albums response format, expected array.');
+            console.warn(`Unexpected albums response format: expected array but got ${typeof response}.`);
             return [];
         }
 
