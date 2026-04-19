@@ -620,8 +620,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 id: album.id,
                 name: album.albumName,
                 description: this.stripNoSyncTag(album.description ?? ''),
-                ownerUsername: album.ownerUsername,
-                ownerId: album.ownerId,
+                ownerUsername: album.ownerUsername ?? '',
+                ownerId: album.ownerId ?? '',
                 createdAt: album.createdAt,
                 updatedAt: album.updatedAt,
             },
@@ -705,7 +705,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             const existing = (sharedUser.userId && byUserId.get(sharedUser.userId)) || byUsername.get(normalizedName);
 
             if (!existing) {
-                throw new Error(`Blocked save: shared user '${sharedUser.username}' is unknown in this album. Add/remove users in Immich UI first.`);
+                throw new Error(`Blocked save: shared user '${sharedUser.username}' is not currently shared on this album. Add new users in the Immich UI before editing their role here.`);
             }
 
             updatedSharedUsers.push({
