@@ -15,7 +15,7 @@ const ALBUM_METADATA_FILE_NAMES = new Set(['album.yaml']);
 const ALBUM_METADATA_PRIMARY_FILE_NAME = 'album.yaml';
 const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
 const NOSYNC_TAG = '#nosync';
-const NOSYNC_TAG_REGEX = new RegExp(`(?:^|\\s+)${NOSYNC_TAG}(?=\\s+|$)`, 'g');
+const NOSYNC_TAG_REGEX = new RegExp(`(?:^|\\s+)${NOSYNC_TAG}(?:\\s+|$)`, 'g');
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -655,13 +655,16 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const current = this.buildAlbumMetadataDocument(album);
 
         // Immutable fields
-        if (metadata.schemaVersion !== current.schemaVersion
-            || metadata.album.id !== current.album.id
-            || metadata.album.name !== current.album.name
-            || metadata.album.ownerUsername !== current.album.ownerUsername
-            || metadata.album.ownerId !== current.album.ownerId
-            || metadata.links.immichWeb !== current.links.immichWeb) {
-            throw new Error('Blocked save: immutable album.yaml fields were modified.');
+        const changedImmutableFields: string[] = [];
+        if (metadata.schemaVersion !== current.schemaVersion) changedImmutableFields.push('schemaVersion');
+        if (metadata.album.id !== current.album.id) changedImmutableFields.push('album.id');
+        if (metadata.album.name !== current.album.name) changedImmutableFields.push('album.name');
+        if (metadata.album.ownerUsername !== current.album.ownerUsername) changedImmutableFields.push('album.ownerUsername');
+        if (metadata.album.ownerId !== current.album.ownerId) changedImmutableFields.push('album.ownerId');
+        if (metadata.links.immichWeb !== current.links.immichWeb) changedImmutableFields.push('links.immichWeb');
+
+        if (changedImmutableFields.length > 0) {
+            throw new Error(`Blocked save: immutable album.yaml fields were modified (${changedImmutableFields.join(', ')}).`);
         }
 
         // Only owner may edit metadata
@@ -782,16 +785,24 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         const normalize = (entries: AlbumMetadataSharedUser[]) => entries
-            .map(entry => JSON.stringify({
+            .map(entry => ({
                 userId: (entry.userId ?? '').toLowerCase(),
                 username: entry.username.toLowerCase(),
                 role: entry.role.toLowerCase(),
             }))
-            .sort();
+            .sort((left, right) =>
+                left.userId.localeCompare(right.userId)
+                || left.username.localeCompare(right.username)
+                || left.role.localeCompare(right.role)
+            );
 
         const left = normalize(a);
         const right = normalize(b);
-        return left.every((value, index) => value === right[index]);
+        return left.every((entry, index) =>
+            entry.userId === right[index].userId
+            && entry.username === right[index].username
+            && entry.role === right[index].role
+        );
     }
 
     private hasNoSyncTag(description: string | undefined): boolean {
@@ -805,8 +816,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
             .trim();
     }
 
-    private mergeNoSyncTag(descriptionWithoutTag: string, hiddenFromSftp: boolean): string {
-        const cleaned = this.stripNoSyncTag(descriptionWithoutTag);
+    private mergeNoSyncTag(descriptionText: string, hiddenFromSftp: boolean): string {
+        const cleaned = this.stripNoSyncTag(descriptionText);
         if (!hiddenFromSftp) {
             return cleaned;
         }
@@ -835,8 +846,17 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     private getAlbumMtime(album: ImmichAlbum): number {
-        const timestamp = album.updatedAt ? new Date(album.updatedAt).getTime() : 0;
-        return Number.isFinite(timestamp) && timestamp > 0 ? Math.floor(timestamp / 1000) : 0;
+        const updatedTimestamp = album.updatedAt ? new Date(album.updatedAt).getTime() : NaN;
+        if (Number.isFinite(updatedTimestamp) && updatedTimestamp > 0) {
+            return Math.floor(updatedTimestamp / 1000);
+        }
+
+        const createdTimestamp = album.createdAt ? new Date(album.createdAt).getTime() : NaN;
+        if (Number.isFinite(createdTimestamp) && createdTimestamp > 0) {
+            return Math.floor(createdTimestamp / 1000);
+        }
+
+        return Math.floor(Date.now() / 1000);
     }
 
     private extractCurrentUser(rawUser: any, fallbackUsername: string): ImmichUser {
