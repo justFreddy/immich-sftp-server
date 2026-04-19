@@ -29,8 +29,7 @@ process.stdout.write(JSON.stringify({
 test('asset settings can be read from root YAML file', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-sftp-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tmpDir, 'immich-sftp-server.yaml'), `
-asset:
+  fs.writeFileSync(path.join(tmpDir, 'immich-sftp-server.yaml'), `asset:
   fileNamePattern: short_uuid
   downloadSource: preview
 `);
@@ -45,8 +44,7 @@ asset:
 test('environment variables override YAML asset settings', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-sftp-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tmpDir, 'immich-sftp-server.yaml'), `
-asset:
+  fs.writeFileSync(path.join(tmpDir, 'immich-sftp-server.yaml'), `asset:
   fileNamePattern: original
   downloadSource: original
 `);

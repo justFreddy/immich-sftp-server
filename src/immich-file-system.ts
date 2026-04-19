@@ -456,11 +456,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         const ownAlbums = Array.isArray(ownAlbumsResponse) ? ownAlbumsResponse : [];
         const sharedAlbums = Array.isArray(sharedAlbumsResponse) ? sharedAlbumsResponse : [];
-        const combinedByAlbumId = new Map<string, unknown>();
+        const combinedByAlbumId = new Map<string, Record<string, unknown>>();
+        const isObjectWithId = (value: unknown): value is Record<string, unknown> & { id: unknown } =>
+            typeof value === 'object' && value !== null && !Array.isArray(value) && 'id' in value;
 
         for (const album of [...ownAlbums, ...sharedAlbums]) {
-            if (album && typeof album === 'object' && 'id' in album) {
-                combinedByAlbumId.set(String((album as { id: unknown }).id), album);
+            if (isObjectWithId(album)) {
+                combinedByAlbumId.set(String(album.id), album);
             }
         }
 
