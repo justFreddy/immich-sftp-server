@@ -1,3 +1,5 @@
+import type { TransferProtocolServer } from './transfer-protocol-server';
+
 async function startServers(): Promise<void> {
   try {
     const [{ config }, { FtpProtocolServer }, { SftpProtocolServer }] = await Promise.all([
@@ -5,7 +7,7 @@ async function startServers(): Promise<void> {
       import('./ftp-server'),
       import('./sftp-server'),
     ]);
-    const servers = [];
+    const servers: TransferProtocolServer[] = [];
 
     if (config.enableSftp) {
       servers.push(new SftpProtocolServer());
