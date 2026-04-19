@@ -9,6 +9,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { DateTime } from 'luxon';
 import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstützt, es geht dann nur noch als ES module.
+import path from 'path';
 import {
     ALBUM_METADATA_FILE_NAME,
     ALBUM_BROWSER_LINK_FILE_NAME,
@@ -31,6 +32,8 @@ import {
     buildAlbumBrowserLinkForAlbum,
     buildAlbumMetadataYamlForAlbum
 } from './immich-album-virtual-file-service';
+
+const DEFAULT_ASSET_BASE_NAME = 'asset';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -188,7 +191,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     name: album.albumName,
                     isDir: true,
                     size: 0,
-                    mtime: 0,
+                    mtime: getAlbumMtime(album),
                 }));
             }
             else {
@@ -198,10 +201,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 // Map assets to the expected format
                 const files = (album.assets ?? []).map((asset) => ({
-                    name: asset.originalFileName,
+                    name: this.getAssetDisplayName(asset, album),
                     isDir: false,
                     size: asset.fileSizeInByte,
-                    mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
+                    mtime: this.getAssetMtime(asset),
                 }));
 
                 // Add virtual album metadata/link files
@@ -248,9 +251,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const asset = await this.getAssetFromCache(filename, false);
 
         // Fetch the original file as a buffer
+        const endpoint = config.assetDownloadSource === 'preview'
+            ? `assets/${asset.id}/thumbnail`
+            : `assets/${asset.id}/original`;
+
         const responseStream: Readable = await this.immichRequest({
             method: 'GET',
-            endpoint: `assets/${asset.id}/original`,
+            endpoint,
             logAction: 'Download asset',
             respAsStream: true
         });
@@ -299,7 +306,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return {
                     isDir: true,
                     size: 0,    // Albums don't have a size
-                    mtime: 0,   // Albums don't have a modification time
+                    mtime: getAlbumMtime(album),
                 };
             }
             return null; // Album not found
@@ -334,7 +341,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return {
                     isDir: false,
                     size: asset.fileSizeInByte,
-                    mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
+                    mtime: this.getAssetMtime(asset),
                 };
             }
             // Asset not found
@@ -432,22 +439,34 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
+        const [ownAlbumsResponse, sharedAlbumsResponse] = await Promise.all([
+            this.immichRequest({
+                method: 'GET',
+                endpoint: 'albums',
+                logAction: 'All own albums',
+                skipResponseLog: true,
+            }),
+            this.immichRequest({
+                method: 'GET',
+                endpoint: 'albums?shared=true',
+                logAction: 'All shared albums',
+                skipResponseLog: true,
+            }),
+        ]);
 
-        //Parameter "shaerd":
-        // - not set: All albums owned by me, also when shared with other users
-        // - false: only own albums, that are not shared with other users
-        // - true: only shared albums, own and from other users shared with me
+        const ownAlbums = Array.isArray(ownAlbumsResponse) ? ownAlbumsResponse : [];
+        const sharedAlbums = Array.isArray(sharedAlbumsResponse) ? sharedAlbumsResponse : [];
+        const combinedByAlbumId = new Map<string, Record<string, unknown>>();
+        const isObjectWithId = (value: unknown): value is Record<string, unknown> & { id: unknown } =>
+            typeof value === 'object' && value !== null && !Array.isArray(value) && 'id' in value;
 
-        // Fetch albums from Immich API
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: 'albums',
-            logAction: 'All own albums',
-            skipResponseLog: true,
-        });
+        for (const album of [...ownAlbums, ...sharedAlbums]) {
+            if (isObjectWithId(album)) {
+                combinedByAlbumId.set(String(album.id), album);
+            }
+        }
 
-        //Process and filter albums
-        return this.filterAlbums(response);
+        return this.filterAlbums(Array.from(combinedByAlbumId.values()));
     }
     private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
         // Check in which albums the asset is used
@@ -509,6 +528,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return {
                 id: asset.id,
                 originalFileName: asset.originalFileName,
+                createdAt: asset.createdAt,
+                updatedAt: asset.updatedAt,
                 fileCreatedAt: asset.fileCreatedAt,
                 fileModifiedAt: asset.fileModifiedAt,
                 fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
@@ -571,9 +592,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
             await this.fetchAssetsForAlbum(album);
         }
 
-        // Find the asset in the album based on the original file name
+        // Find the asset in the album based on the configured visible file name
         const assetFileName = this.extractPathInfo(filename).fileName;
-        return album.assets?.find(a => a.originalFileName === assetFileName) || null;
+        if (!assetFileName || !album.assets) {
+            return null;
+        }
+
+        return this.getAssetDisplayNameMap(album).get(assetFileName) ?? null;
     }
     private async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
@@ -637,7 +662,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         try {
             console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, this.filterLogData(data));
 
-            const isDownload = method === 'GET' && endpoint.startsWith('assets/') && endpoint.endsWith('/original');
+            const isDownload = method === 'GET' && endpoint.startsWith('assets/') && (endpoint.endsWith('/original') || endpoint.endsWith('/thumbnail'));
 
             const response = await axios.request({
                 method: method,
@@ -693,6 +718,86 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return data; // Return as is if not an object
     }
 
+    private getAssetMtime(asset: ImmichAsset): number {
+        // Prefer Immich server-maintained timestamps first, then fall back to uploaded file timestamps.
+        const candidates = [asset.updatedAt, asset.createdAt, asset.fileModifiedAt, asset.fileCreatedAt];
+        for (const value of candidates) {
+            const timestamp = value ? new Date(value).getTime() : NaN;
+            if (Number.isFinite(timestamp) && timestamp > 0) {
+                return Math.floor(timestamp / 1000);
+            }
+        }
+
+        console.warn(`Asset '${asset.originalFileName}' (ID: ${asset.id}) has missing/invalid timestamps, using current time fallback.`);
+        return Math.floor(Date.now() / 1000);
+    }
+
+    private getAssetDisplayName(asset: ImmichAsset, album: ImmichAlbum): string {
+        return this.getAssetDisplayNameByAssetId(album).get(asset.id) ?? asset.originalFileName;
+    }
+
+    private getAssetDisplayNameMap(album: ImmichAlbum): Map<string, ImmichAsset> {
+        const byDisplayName = new Map<string, ImmichAsset>();
+        const usedNames = new Set<string>([ALBUM_METADATA_FILE_NAME, ALBUM_BROWSER_LINK_FILE_NAME]);
+
+        for (const asset of album.assets ?? []) {
+            const preferredName = this.buildPreferredAssetName(asset);
+            const uniqueName = this.ensureUniqueAssetName(preferredName, asset, usedNames);
+            usedNames.add(uniqueName);
+            byDisplayName.set(uniqueName, asset);
+        }
+        return byDisplayName;
+    }
+
+    private getAssetDisplayNameByAssetId(album: ImmichAlbum): Map<string, string> {
+        const byAssetId = new Map<string, string>();
+        for (const [displayName, asset] of this.getAssetDisplayNameMap(album).entries()) {
+            byAssetId.set(asset.id, displayName);
+        }
+        return byAssetId;
+    }
+
+    private buildPreferredAssetName(asset: ImmichAsset): string {
+        const extension = path.extname(asset.originalFileName);
+        const timestamp = this.getAssetMtime(asset);
+        const dt = DateTime.fromSeconds(timestamp, { zone: config.TZ });
+        const formattedTimestamp = `${dt.toFormat('yyyyLLdd_HHmmss')}${String(dt.millisecond).padStart(3, '0')}`;
+        const shortId = asset.id.slice(0, 8);
+
+        switch (config.assetFileNamePattern) {
+            case 'assetUuid':
+                return `${asset.id}${extension}`;
+            case 'shortUuid':
+                return `img_${shortId}${extension}`;
+            case 'date':
+                return `${formattedTimestamp}${extension}`;
+            case 'dateUuid':
+                return `${formattedTimestamp}_${shortId}${extension}`;
+            case 'original':
+            default:
+                return asset.originalFileName;
+        }
+    }
+
+    private ensureUniqueAssetName(preferredName: string, asset: ImmichAsset, usedNames: Set<string>): string {
+        if (!usedNames.has(preferredName)) {
+            return preferredName;
+        }
+
+        const parsed = path.parse(preferredName);
+        const shortId = asset.id.slice(0, 8);
+        const base = parsed.name || DEFAULT_ASSET_BASE_NAME;
+        const ext = parsed.ext || path.extname(asset.originalFileName);
+
+        let candidate = `${base}__${shortId}${ext}`;
+        let counter = 2;
+        while (usedNames.has(candidate)) {
+            candidate = `${base}__${shortId}_${counter}${ext}`;
+            counter += 1;
+        }
+        return candidate;
+    }
+
 }
 
 
@@ -705,6 +810,8 @@ interface ImmichAlbum extends ImmichAlbumBase {
 interface ImmichAsset {
     id: string;
     originalFileName: string;
+    createdAt?: string;
+    updatedAt?: string;
     fileCreatedAt: string;
     fileModifiedAt: string;
     fileSizeInByte: number;
