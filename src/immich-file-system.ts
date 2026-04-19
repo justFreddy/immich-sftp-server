@@ -9,7 +9,28 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { DateTime } from 'luxon';
 import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstützt, es geht dann nur noch als ES module.
-
+import {
+    ALBUM_METADATA_FILE_NAME,
+    ALBUM_BROWSER_LINK_FILE_NAME,
+    hasNoSyncTag,
+    isAlbumBrowserLinkFileName,
+    isAlbumMetadataFileName
+} from './album-metadata';
+import {
+    applyAlbumDetails,
+    extractCurrentUser,
+    getAlbumMtime,
+    ImmichAlbumApiResponse,
+    ImmichAlbumBase,
+    ImmichAlbumUser,
+    ImmichUser,
+    mapAlbumFromApi
+} from './immich-album-helpers';
+import {
+    applyAlbumMetadataFileContent,
+    buildAlbumBrowserLinkForAlbum,
+    buildAlbumMetadataYamlForAlbum
+} from './immich-album-virtual-file-service';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -17,6 +38,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private immichAccessToken: string = '';
     private albumsCache: ImmichAlbum[] = [];
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
+    private currentUser: ImmichUser | null = null;
 
     async login(username: string, password: string): Promise<void> {
         const loginResp = await this.immichRequest({
@@ -31,6 +53,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // Store the access token
         this.immichAccessToken = loginResp.accessToken;
+
+        // Try to get current user from login response first
+        this.currentUser = extractCurrentUser(loginResp.user, username);
+
+        // Fallback to users/me endpoint
+        if (!this.currentUser?.id || !this.currentUser?.username) {
+            await this.fetchCurrentUser(username);
+        }
     }
     async logout(): Promise<void> {
         await this.immichRequest({
@@ -38,9 +68,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
             endpoint: 'auth/logout',
             logAction: 'Logout'
         });
+        this.currentUser = null;
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {
+        // Metadata/link files are applied on CLOSE and don't need SETSTAT handling
+        if (this.isVirtualAlbumFile(filename)) {
+            return;
+        }
 
         // Check if the file exists in the upload queue
         const fileEntry = this.uploadQueue.find(f => f.filename === filename);
@@ -131,7 +166,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Add the new asset to the album
-        const addAssetResponse = await this.immichRequest({
+        await this.immichRequest({
             method: 'PUT',
             endpoint: `albums/${album.id}/assets`,
             data: JSON.stringify({
@@ -162,12 +197,31 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 await this.fetchAssetsForAlbum(album);
 
                 // Map assets to the expected format
-                return (album.assets ?? []).map((asset) => ({
+                const files = (album.assets ?? []).map((asset) => ({
                     name: asset.originalFileName,
                     isDir: false,
                     size: asset.fileSizeInByte,
                     mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
                 }));
+
+                // Add virtual album metadata/link files
+                const metadataContent = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
+                const linkContent = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
+
+                files.push({
+                    name: ALBUM_METADATA_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(metadataContent, 'utf8'),
+                    mtime: getAlbumMtime(album),
+                });
+                files.push({
+                    name: ALBUM_BROWSER_LINK_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(linkContent, 'utf8'),
+                    mtime: getAlbumMtime(album),
+                });
+
+                return files;
             }
         }
         catch (error) {
@@ -176,6 +230,18 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     async readFile(filename: string): Promise<tmp.FileResult> {
+        if (this.isAlbumMetadataFilePath(filename)) {
+            const album = await this.getAlbumFromCache(filename, false);
+            await this.fetchAssetsForAlbum(album);
+            return this.tmpFileFromString(buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl));
+        }
+
+        if (this.isAlbumBrowserLinkFilePath(filename)) {
+            const album = await this.getAlbumFromCache(filename, false);
+            await this.fetchAssetsForAlbum(album);
+            return this.tmpFileFromString(buildAlbumBrowserLinkForAlbum(album, this.baseUrl));
+        }
+
         //todo refactor this: Stream not Buffer, Check and refresh cache
 
         // Get the asset from the cache
@@ -198,6 +264,28 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return tmpFile;
     }
     async writeFile(filename: string, tmpFile: tmp.FileResult): Promise<void> {
+        if (this.isAlbumMetadataFilePath(filename)) {
+            const album = await this.getAlbumFromCache(filename, false);
+            await this.fetchAssetsForAlbum(album);
+            const content = fs.readFileSync(tmpFile.name, 'utf8');
+            tmpFile.removeCallback();
+            await applyAlbumMetadataFileContent({
+                album,
+                content,
+                currentUser: this.currentUser,
+                baseUrl: this.baseUrl,
+                immichRequest: (request) => this.immichRequest(request),
+                refreshAlbumAssets: (targetAlbum) => this.fetchAssetsForAlbum(targetAlbum),
+            });
+            this.albumsCache = await this.fetchAlbums();
+            return;
+        }
+
+        if (this.isAlbumBrowserLinkFilePath(filename)) {
+            tmpFile.removeCallback();
+            throw new Error(`'${ALBUM_BROWSER_LINK_FILE_NAME}' is read-only.`);
+        }
+
         this.uploadQueue.push({ filename, tmpFile });
     }
     async stat(filename: string): Promise<{ isDir: boolean; size: number; mtime: number; } | null> {
@@ -217,6 +305,29 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return null; // Album not found
 
         } else {
+            if (this.isVirtualAlbumFile(filename)) {
+                const album = await this.getAlbumOrNullFromCache(filename, true);
+                if (!album) {
+                    return null;
+                }
+
+                if (this.isAlbumMetadataFilePath(filename)) {
+                    const metadata = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
+                    return {
+                        isDir: false,
+                        size: Buffer.byteLength(metadata, 'utf8'),
+                        mtime: getAlbumMtime(album),
+                    };
+                }
+
+                const link = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
+                return {
+                    isDir: false,
+                    size: Buffer.byteLength(link, 'utf8'),
+                    mtime: getAlbumMtime(album),
+                };
+            }
+
             // It's a file (asset)
             const asset = await this.getAssetOrNullFromCache(filename, true);
             if (asset) {
@@ -231,6 +342,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     async rename(oldName: string, newName: string): Promise<void> {
+        if (this.isVirtualAlbumFile(oldName) || this.isVirtualAlbumFile(newName)) {
+            throw new Error('Renaming virtual album files is not supported.');
+        }
+
         // Check if the file exists in the upload queue
         const fileIndex = this.uploadQueue.findIndex(f => f.filename === oldName);
 
@@ -269,6 +384,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // Check if the path is a file (asset)
         if (pathInfo.albumName != null && pathInfo.fileName != null) {
+            if (this.isVirtualAlbumFile(filename)) {
+                throw new Error('Virtual album files cannot be deleted.');
+            }
+
             // Get the album and asset from the cache
             const album = await this.getAlbumFromCache(filename, false);
             const asset = await this.getAssetFromCache(filename, false);
@@ -284,7 +403,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Create a new album in Immich
-        const response = await this.immichRequest({
+        await this.immichRequest({
             method: 'POST',
             endpoint: 'albums',
             data: JSON.stringify({ albumName: cleanedPath }),
@@ -292,7 +411,26 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
     }
 
-    //Find albums and assets    
+    // Find albums and assets
+    private async fetchCurrentUser(fallbackUsername: string): Promise<void> {
+        try {
+            const me = await this.immichRequest({
+                method: 'GET',
+                endpoint: 'users/me',
+                logAction: 'Current user',
+                skipResponseLog: true,
+            });
+            this.currentUser = extractCurrentUser(me, fallbackUsername);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.warn(`Could not fetch current user (${errorMessage}), falling back to login username.`);
+            this.currentUser = {
+                id: '',
+                username: fallbackUsername,
+                email: fallbackUsername,
+            };
+        }
+    }
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
 
         //Parameter "shaerd":
@@ -323,16 +461,17 @@ export class ImmichFileSystem implements VirtualFileSystem {
         //Process and filter albums
         return this.filterAlbums(response);
     }
-    private filterAlbums(response: any) {
+    private filterAlbums(response: unknown) {
+        if (!Array.isArray(response)) {
+            console.warn(`Unexpected albums response format: expected array but got ${typeof response}.`);
+            return [];
+        }
+
         // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
-            id: item.id,
-            albumName: item.albumName,
-            description: item.description,
-        }));
+        const albums: ImmichAlbum[] = response.map((item): ImmichAlbum => mapAlbumFromApi(item as ImmichAlbumApiResponse));
 
         // Filter out albums whose description contains "#nosync"
-        let filteredAlbums = albums.filter(album => !album.description?.includes('#nosync'));
+        let filteredAlbums = albums.filter(album => !hasNoSyncTag(album.description));
 
         // Filter out albums with empty or invalid names
         filteredAlbums = filteredAlbums.filter(album => isValidFilename(album.albumName));
@@ -359,14 +498,15 @@ export class ImmichFileSystem implements VirtualFileSystem {
             skipResponseLog: true,
         });
 
-        // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => {
-            
-            if (!asset.exifInfo?.fileSizeInByte) {
-                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);                
-            }
+        applyAlbumDetails(album, response);
 
-            return{
+        // Convert to ImmichAsset
+        album.assets = (response.assets ?? []).map((asset: any): ImmichAsset => {
+
+            if (!asset.exifInfo?.fileSizeInByte) {
+                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
+            }
+            return {
                 id: asset.id,
                 originalFileName: asset.originalFileName,
                 fileCreatedAt: asset.fileCreatedAt,
@@ -465,11 +605,35 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
     }
 
+    private isAlbumMetadataFilePath(filePath: string): boolean {
+        try {
+            const pathInfo = this.extractPathInfo(filePath);
+            return isAlbumMetadataFileName(pathInfo.fileName);
+        } catch {
+            return false;
+        }
+    }
+    private isAlbumBrowserLinkFilePath(filePath: string): boolean {
+        try {
+            const pathInfo = this.extractPathInfo(filePath);
+            return isAlbumBrowserLinkFileName(pathInfo.fileName);
+        } catch {
+            return false;
+        }
+    }
+    private isVirtualAlbumFile(filePath: string): boolean {
+        return this.isAlbumMetadataFilePath(filePath) || this.isAlbumBrowserLinkFilePath(filePath);
+    }
 
+    private tmpFileFromString(content: string): tmp.FileResult {
+        const tempFile = tmp.fileSync();
+        fs.writeFileSync(tempFile.name, content, 'utf8');
+        return tempFile;
+    }
 
     // Remove trailing slashes from the Immich host URL
     private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
-    private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
+    private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
         try {
             console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, this.filterLogData(data));
 
@@ -510,7 +674,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
 
-    private filterLogData(data: any): any {
+    private filterLogData(data: unknown): unknown {
         // Filter sensitive data from the log
         if (Buffer.isBuffer(data)) {
             return '[Binary Data]'; // Mask the binary data as '[Binary Data]'
@@ -534,10 +698,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
 
 //Data Classes
-interface ImmichAlbum {
-    id: string;
-    albumName: string;
-    description: string;
+interface ImmichAlbum extends ImmichAlbumBase {
     assets?: ImmichAsset[];
 }
 

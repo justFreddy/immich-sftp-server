@@ -8,6 +8,7 @@ import { JsonFileSystem } from './json-file-system';
 import { ImmichFileSystem } from './immich-file-system';
 import { ensureHostKeySync } from "./ensure-host-key";
 import { config } from './config';
+import { TransferProtocolServer } from './transfer-protocol-server';
 
 // SFTP Statuscodes
 const STATUS_CODE = {
@@ -451,10 +452,19 @@ const server = new Server({
   });
 });
 
-//Start the Server
-server.listen(22, '0.0.0.0', function () {
-  console.log('SFTP server listening on port 22');
-});
+export class SftpProtocolServer implements TransferProtocolServer {
+  readonly name = 'sftp';
+
+  async start(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      server.listen(config.sftpPort, config.listenHost, function () {
+        console.log(`SFTP server listening on ${config.listenHost}:${config.sftpPort}`);
+        resolve();
+      });
+      server.on('error', reject);
+    });
+  }
+}
 
 
 //Helper

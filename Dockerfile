@@ -35,8 +35,9 @@ COPY --from=builder /app/package*.json ./
 # Install only production dependencies to keep image small
 RUN npm install --omit=dev
 
-# Expose the port your SFTP server listens on
+# Expose SFTP and FTP control ports
 EXPOSE 22
+EXPOSE 21
 
-# Default command to run your SFTP server
-CMD ["node", "dist/sftp-server.js"]
+# Default command to run transfer servers bootstrap
+CMD ["node", "dist/server.js"]
