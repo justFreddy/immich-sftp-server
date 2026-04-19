@@ -61,6 +61,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             endpoint: 'auth/logout',
             logAction: 'Logout'
         });
+        this.currentUser = null;
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {

@@ -5,6 +5,7 @@ export const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
 
 const NOSYNC_TAG = '#nosync';
 const NOSYNC_TAG_REGEX = /(?:^|\s)#nosync(?:\s|$)/g;
+const NOSYNC_TAG_MATCH_REGEX = /(?:^|\s)#nosync(?:\s|$)/;
 
 export interface AlbumMetadataSharedUser {
     userId?: string;
@@ -146,7 +147,7 @@ export function sameSharedUsers(a: AlbumMetadataSharedUser[], b: AlbumMetadataSh
 }
 
 export function hasNoSyncTag(description: string | undefined): boolean {
-    return (description ?? '').includes(NOSYNC_TAG);
+    return NOSYNC_TAG_MATCH_REGEX.test(description ?? '');
 }
 
 export function stripNoSyncTag(description: string): string {
