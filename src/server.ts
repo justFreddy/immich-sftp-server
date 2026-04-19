@@ -28,4 +28,7 @@ async function startServers(): Promise<void> {
   }
 }
 
-void startServers();
+startServers().catch((error) => {
+  console.error('Unhandled startup error:', error);
+  process.exit(1);
+});
