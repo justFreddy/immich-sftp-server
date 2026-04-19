@@ -15,7 +15,7 @@ const ALBUM_METADATA_FILE_NAMES = new Set(['album.yaml']);
 const ALBUM_METADATA_PRIMARY_FILE_NAME = 'album.yaml';
 const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
 const NOSYNC_TAG = '#nosync';
-const NOSYNC_TAG_REGEX = new RegExp(`(?:^|\\s+)${NOSYNC_TAG}(?:\\s+|$)`, 'g');
+const NOSYNC_TAG_REGEX = new RegExp(`(?:^|\\s)${NOSYNC_TAG}(?:\\s|$)`, 'g');
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -790,11 +790,19 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 username: entry.username.toLowerCase(),
                 role: entry.role.toLowerCase(),
             }))
-            .sort((left, right) =>
-                left.userId.localeCompare(right.userId)
-                || left.username.localeCompare(right.username)
-                || left.role.localeCompare(right.role)
-            );
+            .sort((left, right) => {
+                const byUserId = left.userId.localeCompare(right.userId);
+                if (byUserId !== 0) {
+                    return byUserId;
+                }
+
+                const byUsername = left.username.localeCompare(right.username);
+                if (byUsername !== 0) {
+                    return byUsername;
+                }
+
+                return left.role.localeCompare(right.role);
+            });
 
         const left = normalize(a);
         const right = normalize(b);
@@ -859,7 +867,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return Math.floor(Date.now() / 1000);
     }
 
-    private extractCurrentUser(rawUser: any, fallbackUsername: string): ImmichUser {
+    private extractCurrentUser(rawUser: unknown, fallbackUsername: string): ImmichUser {
         if (!this.isObject(rawUser)) {
             return {
                 id: '',
@@ -892,31 +900,39 @@ export class ImmichFileSystem implements VirtualFileSystem {
         };
     }
 
-    private applyAlbumDetails(album: ImmichAlbum, details: any): void {
-        const owner = this.isObject(details?.owner) ? details.owner : null;
+    private applyAlbumDetails(album: ImmichAlbum, details: unknown): void {
+        if (!this.isObject(details)) {
+            return;
+        }
 
-        album.description = String(details?.description ?? album.description ?? '');
-        album.ownerId = owner ? String(owner.id ?? album.ownerId ?? '') : String(details?.ownerId ?? album.ownerId ?? '');
-        album.ownerUsername = owner ? this.extractUsername(owner) : String(details?.ownerName ?? details?.ownerEmail ?? album.ownerUsername ?? '');
-        album.ownerEmail = owner ? String(owner.email ?? album.ownerEmail ?? '') : String(details?.ownerEmail ?? album.ownerEmail ?? '');
-        album.createdAt = details?.createdAt ? String(details.createdAt) : album.createdAt;
-        album.updatedAt = details?.updatedAt ? String(details.updatedAt) : album.updatedAt;
-        album.albumUsers = this.mapAlbumUsers(details?.albumUsers);
+        const owner = this.isObject(details.owner) ? details.owner : null;
+
+        album.description = String(details.description ?? album.description ?? '');
+        album.ownerId = owner ? String(owner.id ?? album.ownerId ?? '') : String(details.ownerId ?? album.ownerId ?? '');
+        album.ownerUsername = owner ? this.extractUsername(owner) : String(details.ownerName ?? details.ownerEmail ?? album.ownerUsername ?? '');
+        album.ownerEmail = owner ? String(owner.email ?? album.ownerEmail ?? '') : String(details.ownerEmail ?? album.ownerEmail ?? '');
+        album.createdAt = details.createdAt ? String(details.createdAt) : album.createdAt;
+        album.updatedAt = details.updatedAt ? String(details.updatedAt) : album.updatedAt;
+        album.albumUsers = this.mapAlbumUsers(details.albumUsers);
     }
 
-    private mapAlbumUsers(rawAlbumUsers: any): ImmichAlbumUser[] {
+    private mapAlbumUsers(rawAlbumUsers: unknown): ImmichAlbumUser[] {
         if (!Array.isArray(rawAlbumUsers)) {
             return [];
         }
 
         return rawAlbumUsers
-            .map((albumUser: any): ImmichAlbumUser | null => {
-                const userRaw = this.isObject(albumUser?.user) ? albumUser.user : albumUser;
+            .map((albumUser: unknown): ImmichAlbumUser | null => {
+                if (!this.isObject(albumUser)) {
+                    return null;
+                }
+
+                const userRaw = this.isObject(albumUser.user) ? albumUser.user : albumUser;
                 if (!this.isObject(userRaw)) {
                     return null;
                 }
 
-                const userId = String(userRaw.id ?? albumUser?.userId ?? '').trim();
+                const userId = String(userRaw.id ?? albumUser.userId ?? '').trim();
                 const username = this.extractUsername(userRaw);
                 if (!userId || !username) {
                     return null;
@@ -925,13 +941,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return {
                     userId,
                     username,
-                    role: String(albumUser?.role ?? 'viewer'),
+                    role: String(albumUser.role ?? 'viewer'),
                 };
             })
             .filter((entry): entry is ImmichAlbumUser => entry !== null);
     }
 
-    private extractUsername(user: Record<string, any>): string {
+    private extractUsername(user: Record<string, unknown>): string {
         return String(user.name ?? user.username ?? user.email ?? user.id ?? '').trim();
     }
 
