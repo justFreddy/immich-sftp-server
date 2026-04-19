@@ -40,8 +40,8 @@ function getEnvNumber(name: string, defaultValue: number): number {
   }
 
   const parsed = Number(val);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid numeric environment variable ${name}: ${val}`);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+    throw new Error(`Invalid numeric environment variable ${name}: ${val}. Expected an integer in range 1-65535.`);
   }
   return parsed;
 }

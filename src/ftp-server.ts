@@ -103,9 +103,9 @@ class ImmichFtpFileSystem extends FileSystem {
     return this.currentDir;
   }
 
-  override write(fileName: string, { append = false, start = undefined }: { append?: boolean; start?: any } = {}): { stream: Writable; clientPath: string } {
+  override write(fileName: string, { append = false, start = undefined }: { append?: boolean; start?: number } = {}): { stream: Writable; clientPath: string } {
     if (append || start != null) {
-      throw new GeneralError('Resume/append uploads are not supported', 502);
+      throw new GeneralError('Resume/append uploads are not supported', 550);
     }
 
     const resolvedPath = normalizePath(fileName, this.currentDir);
@@ -115,7 +115,7 @@ class ImmichFtpFileSystem extends FileSystem {
     };
   }
 
-  override async read(fileName: string, { start = undefined }: { start?: any } = {}): Promise<{ stream: fs.ReadStream; clientPath: string }> {
+  override async read(fileName: string, { start = undefined }: { start?: number } = {}): Promise<{ stream: fs.ReadStream; clientPath: string }> {
     const resolvedPath = normalizePath(fileName, this.currentDir);
     const tmpFile = await this.fsBackend.readFile(resolvedPath);
     const stream = fs.createReadStream(tmpFile.name, start != null ? { start } : undefined);
@@ -127,19 +127,19 @@ class ImmichFtpFileSystem extends FileSystem {
     };
   }
 
-  override async delete(filePath: string): Promise<any> {
+  override async delete(filePath: string): Promise<string> {
     const resolvedPath = normalizePath(filePath, this.currentDir);
     await this.fsBackend.remove(resolvedPath);
     return resolvedPath;
   }
 
-  override async mkdir(filePath: string): Promise<any> {
+  override async mkdir(filePath: string): Promise<string> {
     const resolvedPath = normalizePath(filePath, this.currentDir);
     await this.fsBackend.mkdir(resolvedPath);
     return resolvedPath;
   }
 
-  override async rename(from: string, to: string): Promise<any> {
+  override async rename(from: string, to: string): Promise<string> {
     const resolvedFrom = normalizePath(from, this.currentDir);
     const resolvedTo = normalizePath(to, this.currentDir);
     await this.fsBackend.rename(resolvedFrom, resolvedTo);

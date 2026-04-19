@@ -14,7 +14,7 @@ async function startServers(): Promise<void> {
   }
 
   if (servers.length === 0) {
-    throw new Error('No transfer protocol enabled. Set ENABLE_SFTP and/or ENABLE_FTP to true.');
+    throw new Error('No transfer protocol enabled. Set ENABLE_SFTP and/or ENABLE_FTP (accepted values: true/1/yes/on or false/0/no/off).');
   }
 
   await Promise.all(servers.map((server) => server.start()));
