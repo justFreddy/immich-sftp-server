@@ -65,7 +65,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {
-
         // Metadata/link files are applied on CLOSE and don't need SETSTAT handling
         if (this.isVirtualAlbumFile(filename)) {
             return;
