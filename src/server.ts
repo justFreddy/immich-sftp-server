@@ -1,9 +1,11 @@
-import { config } from './config';
-import { FtpProtocolServer } from './ftp-server';
-import { SftpProtocolServer } from './sftp-server';
-import { TransferProtocolServer } from './transfer-protocol-server';
+import type { TransferProtocolServer } from './transfer-protocol-server';
 
 async function startServers(): Promise<void> {
+  const [{ config }, { FtpProtocolServer }, { SftpProtocolServer }] = await Promise.all([
+    import('./config'),
+    import('./ftp-server'),
+    import('./sftp-server'),
+  ]);
   const servers: TransferProtocolServer[] = [];
 
   if (config.enableSftp) {
@@ -22,6 +24,6 @@ async function startServers(): Promise<void> {
 }
 
 startServers().catch((error) => {
-  console.error('Failed to start transfer servers:', error);
+  console.error('Failed to initialize or start transfer servers:', error);
   process.exit(1);
 });

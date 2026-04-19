@@ -150,6 +150,8 @@ services:
 
 ### Environment variables
 
+- `IMMICH_HOST` (**required**) – base URL of your Immich server (for example `http://immich-server:2283`)
+- `TZ` (default: `UTC`) – timezone used for metadata timestamps (for example `Europe/Berlin`)
 - `ENABLE_SFTP` (default: `true`) – enable/disable SFTP server
 - `ENABLE_FTP` (default: `false`) – enable/disable FTP server
 - `SFTP_PORT` (default: `22`) – internal SFTP listen port

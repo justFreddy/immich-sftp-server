@@ -57,7 +57,7 @@ function isRunningInDocker(): boolean {
 
 export const config = {
   immichHost: requireEnv('IMMICH_HOST'),
-  TZ: requireEnv('TZ'),
+  TZ: getEnvOrDefault('TZ', 'UTC'),
   hostKeyDir: getEnvOrDefault('HOST_KEY_DIR', isRunningInDocker() ? '/data/ssh-host-key' : './data/ssh-host-key'),
   listenHost: getEnvOrDefault('LISTEN_HOST', '0.0.0.0'),
   sftpPort: getEnvNumber('SFTP_PORT', 22),
