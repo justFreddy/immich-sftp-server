@@ -12,17 +12,9 @@ import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 update
 import {
     ALBUM_METADATA_FILE_NAME,
     ALBUM_BROWSER_LINK_FILE_NAME,
-    AlbumMetadataSharedUser,
-    buildAlbumBrowserLink,
-    buildAlbumMetadataDocument,
-    buildAlbumMetadataYaml,
-    getChangedImmutableAlbumMetadataFields,
     hasNoSyncTag,
     isAlbumBrowserLinkFileName,
-    isAlbumMetadataFileName,
-    mergeNoSyncTag,
-    parseAndValidateAlbumMetadataYaml,
-    sameSharedUsers
+    isAlbumMetadataFileName
 } from './album-metadata';
 import {
     applyAlbumDetails,
@@ -32,9 +24,13 @@ import {
     ImmichAlbumBase,
     ImmichAlbumUser,
     ImmichUser,
-    isCurrentUserAlbumOwner,
     mapAlbumFromApi
 } from './immich-album-helpers';
+import {
+    applyAlbumMetadataFileContent,
+    buildAlbumBrowserLinkForAlbum,
+    buildAlbumMetadataYamlForAlbum
+} from './immich-album-virtual-file-service';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -209,8 +205,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 }));
 
                 // Add virtual album metadata/link files
-                const metadataContent = this.buildAlbumMetadataYaml(album);
-                const linkContent = this.buildAlbumBrowserLink(album);
+                const metadataContent = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
+                const linkContent = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
 
                 files.push({
                     name: ALBUM_METADATA_FILE_NAME,
@@ -237,13 +233,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (this.isAlbumMetadataFilePath(filename)) {
             const album = await this.getAlbumFromCache(filename, false);
             await this.fetchAssetsForAlbum(album);
-            return this.tmpFileFromString(this.buildAlbumMetadataYaml(album));
+            return this.tmpFileFromString(buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl));
         }
 
         if (this.isAlbumBrowserLinkFilePath(filename)) {
             const album = await this.getAlbumFromCache(filename, false);
             await this.fetchAssetsForAlbum(album);
-            return this.tmpFileFromString(this.buildAlbumBrowserLink(album));
+            return this.tmpFileFromString(buildAlbumBrowserLinkForAlbum(album, this.baseUrl));
         }
 
         //todo refactor this: Stream not Buffer, Check and refresh cache
@@ -273,7 +269,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
             await this.fetchAssetsForAlbum(album);
             const content = fs.readFileSync(tmpFile.name, 'utf8');
             tmpFile.removeCallback();
-            await this.applyAlbumMetadataFileContent(album, content);
+            await applyAlbumMetadataFileContent({
+                album,
+                content,
+                currentUser: this.currentUser,
+                baseUrl: this.baseUrl,
+                immichRequest: (request) => this.immichRequest(request),
+                refreshAlbumAssets: (targetAlbum) => this.fetchAssetsForAlbum(targetAlbum),
+            });
             this.albumsCache = await this.fetchAlbums();
             return;
         }
@@ -309,7 +312,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 }
 
                 if (this.isAlbumMetadataFilePath(filename)) {
-                    const metadata = this.buildAlbumMetadataYaml(album);
+                    const metadata = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
                     return {
                         isDir: false,
                         size: Buffer.byteLength(metadata, 'utf8'),
@@ -317,7 +320,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     };
                 }
 
-                const link = this.buildAlbumBrowserLink(album);
+                const link = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
                 return {
                     isDir: false,
                     size: Buffer.byteLength(link, 'utf8'),
@@ -626,105 +629,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const tempFile = tmp.fileSync();
         fs.writeFileSync(tempFile.name, content, 'utf8');
         return tempFile;
-    }
-
-    private buildAlbumMetadataYaml(album: ImmichAlbum): string {
-        return buildAlbumMetadataYaml({
-            id: album.id,
-            name: album.albumName,
-            description: album.description,
-            ownerUsername: album.ownerUsername,
-            ownerId: album.ownerId,
-            createdAt: album.createdAt,
-            updatedAt: album.updatedAt,
-            sharedUsers: album.albumUsers,
-        }, isCurrentUserAlbumOwner(album, this.currentUser), this.baseUrl);
-    }
-
-    private buildAlbumBrowserLink(album: ImmichAlbum): string {
-        return buildAlbumBrowserLink(this.baseUrl, album.id);
-    }
-
-    private async applyAlbumMetadataFileContent(album: ImmichAlbum, content: string): Promise<void> {
-        const metadata = parseAndValidateAlbumMetadataYaml(content);
-        const current = buildAlbumMetadataDocument({
-            id: album.id,
-            name: album.albumName,
-            description: album.description,
-            ownerUsername: album.ownerUsername,
-            ownerId: album.ownerId,
-            createdAt: album.createdAt,
-            updatedAt: album.updatedAt,
-            sharedUsers: album.albumUsers,
-        }, isCurrentUserAlbumOwner(album, this.currentUser), this.baseUrl);
-
-        const changedImmutableFields = getChangedImmutableAlbumMetadataFields(current, metadata);
-
-        if (changedImmutableFields.length > 0) {
-            throw new Error(`Blocked save: immutable album.yaml fields were modified (${changedImmutableFields.join(', ')}).`);
-        }
-
-        // Only owner may edit metadata
-        if (!isCurrentUserAlbumOwner(album, this.currentUser)) {
-            throw new Error('Blocked save: only the album owner can edit album.yaml.');
-        }
-
-        // Update album description + #nosync handling
-        const newDescription = mergeNoSyncTag(metadata.album.description, metadata.settings.hiddenFromSftp);
-        if ((album.description ?? '') !== newDescription) {
-            await this.immichRequest({
-                method: 'PATCH',
-                endpoint: `albums/${album.id}`,
-                data: JSON.stringify({ description: newDescription }),
-                logAction: 'Update album description/settings',
-            });
-            album.description = newDescription;
-        }
-
-        // Update sharing if changed
-        if (!sameSharedUsers(current.sharing.sharedUsers, metadata.sharing.sharedUsers)) {
-            await this.updateAlbumSharing(album, metadata.sharing.sharedUsers);
-        }
-
-        // Refresh this album from API
-        await this.fetchAssetsForAlbum(album);
-    }
-
-    private async updateAlbumSharing(album: ImmichAlbum, sharedUsers: AlbumMetadataSharedUser[]): Promise<void> {
-        const existingUsers = album.albumUsers ?? [];
-        const byUserId = new Map(existingUsers.map(user => [user.userId, user]));
-        const byUsername = new Map(existingUsers.map(user => [user.username.toLowerCase(), user]));
-
-        const updatedSharedUsers: Array<{ userId: string; role: string }> = [];
-        for (const sharedUser of sharedUsers) {
-            const normalizedName = sharedUser.username.trim().toLowerCase();
-            const existing = (sharedUser.userId && byUserId.get(sharedUser.userId)) || byUsername.get(normalizedName);
-
-            if (!existing) {
-                throw new Error(`Blocked save: shared user '${sharedUser.username}' is not currently shared on this album. Add new users in the Immich UI before editing their role here.`);
-            }
-
-            updatedSharedUsers.push({
-                userId: existing.userId,
-                role: sharedUser.role,
-            });
-        }
-
-        await this.immichRequest({
-            method: 'PUT',
-            endpoint: `albums/${album.id}/users`,
-            data: JSON.stringify({ albumUsers: updatedSharedUsers }),
-            logAction: 'Update album sharing',
-        });
-
-        album.albumUsers = updatedSharedUsers.map(user => {
-            const existing = byUserId.get(user.userId);
-            return {
-                userId: user.userId,
-                username: existing?.username ?? user.userId,
-                role: user.role,
-            };
-        });
     }
 
     // Remove trailing slashes from the Immich host URL
