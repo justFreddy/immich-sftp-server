@@ -6,14 +6,20 @@ FROM node:20 AS builder
 # Set working directory inside the container
 WORKDIR /app
 
-# Copy all files (you can fine-tune with a .dockerignore)
-COPY . .
+# Copy package metadata first for better layer caching
+COPY package*.json ./
 
-# Install all dependencies, including dev (for TypeScript, etc.)
-RUN npm install
+# Install dependencies including dev dependencies for building
+RUN npm ci --loglevel=error --no-audit --no-fund
+
+# Copy source files
+COPY . .
 
 # Compile TypeScript → JavaScript (output goes to /app/dist)
 RUN npm run build
+
+# Keep only production dependencies for runtime image
+RUN npm prune --omit=dev --loglevel=error --no-audit --no-fund
 
 
 
@@ -28,12 +34,10 @@ WORKDIR /app
 # install ssh-keygen
 RUN apk add --no-cache openssh-keygen
 
-# Only copy compiled JS code and necessary files from builder
+# Only copy compiled JS code, package metadata, and production dependencies from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
-
-# Install only production dependencies to keep image small
-RUN npm install --omit=dev
+COPY --from=builder /app/node_modules ./node_modules
 
 # Expose SFTP and FTP control ports
 EXPOSE 22
