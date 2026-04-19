@@ -11,6 +11,7 @@ const net = require('node:net');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PASSWORD = 'super-secret-password';
 const USERNAMES = ['user@example.com', 'user+mobile@example.com'];
+const SFTP_QUIT_DELAY_MS = 300;
 
 test('FTP and SFTP CLI login accepts email and plus-address usernames', async (t) => {
   if (!commandExists('ftp') || !commandExists('sftp') || !commandExists('sshpass')) {
@@ -55,8 +56,7 @@ function getFreePort() {
     const server = net.createServer();
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
+      const port = getListeningPort(server.address());
       server.close((error) => {
         if (error) {
           reject(error);
@@ -114,8 +114,7 @@ async function startMockImmichServer() {
     server.listen(0, '127.0.0.1', resolve);
   });
 
-  const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 0;
+  const port = getListeningPort(server.address());
 
   return {
     baseUrl: `http://127.0.0.1:${port}`,
@@ -327,7 +326,7 @@ function waitForSftpConnection(args, timeoutMs) {
             child.kill('SIGTERM');
           }
           finish();
-        }, 300);
+        }, SFTP_QUIT_DELAY_MS);
       }
     };
 
@@ -355,4 +354,11 @@ async function waitForExitOrTimeout(child, timeoutMs) {
     once(child, 'exit'),
     new Promise((resolve) => setTimeout(resolve, timeoutMs)),
   ]);
+}
+
+function getListeningPort(address) {
+  if (!address || typeof address === 'string') {
+    throw new Error('Unable to determine listening port.');
+  }
+  return address.port;
 }
