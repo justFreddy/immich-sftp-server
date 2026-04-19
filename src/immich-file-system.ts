@@ -9,7 +9,12 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { DateTime } from 'luxon';
 import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstützt, es geht dann nur noch als ES module.
+import YAML from 'yaml';
 
+const ALBUM_METADATA_FILE_NAMES = new Set(['alum.yaml', 'album.yaml']);
+const ALBUM_METADATA_PRIMARY_FILE_NAME = 'alum.yaml';
+const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
+const NOSYNC_TAG = '#nosync';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -17,6 +22,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private immichAccessToken: string = '';
     private albumsCache: ImmichAlbum[] = [];
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
+    private currentUser: ImmichUser | null = null;
 
     async login(username: string, password: string): Promise<void> {
         const loginResp = await this.immichRequest({
@@ -31,6 +37,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // Store the access token
         this.immichAccessToken = loginResp.accessToken;
+
+        // Try to get current user from login response first
+        this.currentUser = this.extractCurrentUser(loginResp.user, username);
+
+        // Fallback to users/me endpoint
+        if (!this.currentUser?.id || !this.currentUser?.username) {
+            await this.fetchCurrentUser(username);
+        }
     }
     async logout(): Promise<void> {
         await this.immichRequest({
@@ -41,6 +55,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {
+
+        // Metadata/link files are applied on CLOSE and don't need SETSTAT handling
+        if (this.isVirtualAlbumFile(filename)) {
+            return;
+        }
 
         // Check if the file exists in the upload queue
         const fileEntry = this.uploadQueue.find(f => f.filename === filename);
@@ -131,7 +150,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Add the new asset to the album
-        const addAssetResponse = await this.immichRequest({
+        await this.immichRequest({
             method: 'PUT',
             endpoint: `albums/${album.id}/assets`,
             data: JSON.stringify({
@@ -162,12 +181,31 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 await this.fetchAssetsForAlbum(album);
 
                 // Map assets to the expected format
-                return (album.assets ?? []).map((asset) => ({
+                const files = (album.assets ?? []).map((asset) => ({
                     name: asset.originalFileName,
                     isDir: false,
                     size: asset.fileSizeInByte,
                     mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
                 }));
+
+                // Add virtual album metadata/link files
+                const metadataContent = this.buildAlbumMetadataYaml(album);
+                const linkContent = this.buildAlbumBrowserLink(album);
+
+                files.push({
+                    name: ALBUM_METADATA_PRIMARY_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(metadataContent, 'utf8'),
+                    mtime: this.getAlbumMtime(album),
+                });
+                files.push({
+                    name: ALBUM_BROWSER_LINK_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(linkContent, 'utf8'),
+                    mtime: this.getAlbumMtime(album),
+                });
+
+                return files;
             }
         }
         catch (error) {
@@ -176,6 +214,18 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     async readFile(filename: string): Promise<tmp.FileResult> {
+        if (this.isAlbumMetadataFilePath(filename)) {
+            const album = await this.getAlbumFromCache(filename, false);
+            await this.fetchAssetsForAlbum(album);
+            return this.tmpFileFromString(this.buildAlbumMetadataYaml(album));
+        }
+
+        if (this.isAlbumBrowserLinkFilePath(filename)) {
+            const album = await this.getAlbumFromCache(filename, false);
+            await this.fetchAssetsForAlbum(album);
+            return this.tmpFileFromString(this.buildAlbumBrowserLink(album));
+        }
+
         //todo refactor this: Stream not Buffer, Check and refresh cache
 
         // Get the asset from the cache
@@ -198,6 +248,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return tmpFile;
     }
     async writeFile(filename: string, tmpFile: tmp.FileResult): Promise<void> {
+        if (this.isAlbumMetadataFilePath(filename)) {
+            const album = await this.getAlbumFromCache(filename, false);
+            await this.fetchAssetsForAlbum(album);
+            const content = fs.readFileSync(tmpFile.name, 'utf8');
+            tmpFile.removeCallback();
+            await this.applyAlbumMetadataFileContent(album, content);
+            this.albumsCache = await this.fetchAlbums();
+            return;
+        }
+
+        if (this.isAlbumBrowserLinkFilePath(filename)) {
+            tmpFile.removeCallback();
+            throw new Error(`'${ALBUM_BROWSER_LINK_FILE_NAME}' is read-only.`);
+        }
+
         this.uploadQueue.push({ filename, tmpFile });
     }
     async stat(filename: string): Promise<{ isDir: boolean; size: number; mtime: number; } | null> {
@@ -217,6 +282,29 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return null; // Album not found
 
         } else {
+            if (this.isVirtualAlbumFile(filename)) {
+                const album = await this.getAlbumOrNullFromCache(filename, true);
+                if (!album) {
+                    return null;
+                }
+
+                if (this.isAlbumMetadataFilePath(filename)) {
+                    const metadata = this.buildAlbumMetadataYaml(album);
+                    return {
+                        isDir: false,
+                        size: Buffer.byteLength(metadata, 'utf8'),
+                        mtime: this.getAlbumMtime(album),
+                    };
+                }
+
+                const link = this.buildAlbumBrowserLink(album);
+                return {
+                    isDir: false,
+                    size: Buffer.byteLength(link, 'utf8'),
+                    mtime: this.getAlbumMtime(album),
+                };
+            }
+
             // It's a file (asset)
             const asset = await this.getAssetOrNullFromCache(filename, true);
             if (asset) {
@@ -231,6 +319,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     async rename(oldName: string, newName: string): Promise<void> {
+        if (this.isVirtualAlbumFile(oldName) || this.isVirtualAlbumFile(newName)) {
+            throw new Error('Renaming virtual album files is not supported.');
+        }
+
         // Check if the file exists in the upload queue
         const fileIndex = this.uploadQueue.findIndex(f => f.filename === oldName);
 
@@ -269,6 +361,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // Check if the path is a file (asset)
         if (pathInfo.albumName != null && pathInfo.fileName != null) {
+            if (this.isVirtualAlbumFile(filename)) {
+                throw new Error('Virtual album files cannot be deleted.');
+            }
+
             // Get the album and asset from the cache
             const album = await this.getAlbumFromCache(filename, false);
             const asset = await this.getAssetFromCache(filename, false);
@@ -284,7 +380,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Create a new album in Immich
-        const response = await this.immichRequest({
+        await this.immichRequest({
             method: 'POST',
             endpoint: 'albums',
             data: JSON.stringify({ albumName: cleanedPath }),
@@ -292,7 +388,25 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
     }
 
-    //Find albums and assets    
+    //Find albums and assets
+    private async fetchCurrentUser(fallbackUsername: string): Promise<void> {
+        try {
+            const me = await this.immichRequest({
+                method: 'GET',
+                endpoint: 'users/me',
+                logAction: 'Current user',
+                skipResponseLog: true,
+            });
+            this.currentUser = this.extractCurrentUser(me, fallbackUsername);
+        } catch (error) {
+            console.warn('Could not fetch current user, falling back to login username.');
+            this.currentUser = {
+                id: '',
+                username: fallbackUsername,
+                email: fallbackUsername,
+            };
+        }
+    }
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
 
         //Parameter "shaerd":
@@ -325,14 +439,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     private filterAlbums(response: any) {
         // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
-            id: item.id,
-            albumName: item.albumName,
-            description: item.description,
-        }));
+        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => this.mapAlbumFromApi(item));
 
         // Filter out albums whose description contains "#nosync"
-        let filteredAlbums = albums.filter(album => !album.description?.includes('#nosync'));
+        let filteredAlbums = albums.filter(album => !album.description?.includes(NOSYNC_TAG));
 
         // Filter out albums with empty or invalid names
         filteredAlbums = filteredAlbums.filter(album => isValidFilename(album.albumName));
@@ -359,14 +469,16 @@ export class ImmichFileSystem implements VirtualFileSystem {
             skipResponseLog: true,
         });
 
+        this.applyAlbumDetails(album, response);
+
         // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => {
-            
+        album.assets = (response.assets ?? []).map((asset: any): ImmichAsset => {
+
             if (!asset.exifInfo?.fileSizeInByte) {
-                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);                
+                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
             }
 
-            return{
+            return {
                 id: asset.id,
                 originalFileName: asset.originalFileName,
                 fileCreatedAt: asset.fileCreatedAt,
@@ -465,11 +577,342 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
     }
 
+    private isAlbumMetadataFilePath(filePath: string): boolean {
+        try {
+            const pathInfo = this.extractPathInfo(filePath);
+            return pathInfo.fileName !== null && ALBUM_METADATA_FILE_NAMES.has(pathInfo.fileName);
+        } catch {
+            return false;
+        }
+    }
+    private isAlbumBrowserLinkFilePath(filePath: string): boolean {
+        try {
+            const pathInfo = this.extractPathInfo(filePath);
+            return pathInfo.fileName === ALBUM_BROWSER_LINK_FILE_NAME;
+        } catch {
+            return false;
+        }
+    }
+    private isVirtualAlbumFile(filePath: string): boolean {
+        return this.isAlbumMetadataFilePath(filePath) || this.isAlbumBrowserLinkFilePath(filePath);
+    }
 
+    private tmpFileFromString(content: string): tmp.FileResult {
+        const tempFile = tmp.fileSync();
+        fs.writeFileSync(tempFile.name, content, 'utf8');
+        return tempFile;
+    }
+
+    private buildAlbumMetadataYaml(album: ImmichAlbum): string {
+        return YAML.stringify(this.buildAlbumMetadataDocument(album));
+    }
+
+    private buildAlbumMetadataDocument(album: ImmichAlbum): AlbumMetadataDocument {
+        return {
+            schemaVersion: 1,
+            album: {
+                id: album.id,
+                name: album.albumName,
+                description: this.stripNoSyncTag(album.description ?? ''),
+                ownerUsername: album.ownerUsername,
+                ownerId: album.ownerId,
+                createdAt: album.createdAt,
+                updatedAt: album.updatedAt,
+            },
+            sharing: {
+                canEditSharedUsers: this.isCurrentUserAlbumOwner(album),
+                sharedUsers: (album.albumUsers ?? []).map(user => ({
+                    userId: user.userId,
+                    username: user.username,
+                    role: user.role,
+                })),
+            },
+            settings: {
+                hiddenFromSftp: this.hasNoSyncTag(album.description),
+            },
+            links: {
+                immichWeb: `${this.baseUrl}/albums/${album.id}`,
+            },
+        };
+    }
+
+    private buildAlbumBrowserLink(album: ImmichAlbum): string {
+        return `[InternetShortcut]\nURL=${this.baseUrl}/albums/${album.id}\n`;
+    }
+
+    private async applyAlbumMetadataFileContent(album: ImmichAlbum, content: string): Promise<void> {
+        const parsed = YAML.parse(content);
+        if (!this.isObject(parsed)) {
+            throw new Error('Invalid alum.yaml: expected a YAML object.');
+        }
+
+        const metadata = this.validateAlbumMetadataDocument(parsed);
+        const current = this.buildAlbumMetadataDocument(album);
+
+        // Immutable fields
+        if (metadata.schemaVersion !== current.schemaVersion
+            || metadata.album.id !== current.album.id
+            || metadata.album.name !== current.album.name
+            || metadata.album.ownerUsername !== current.album.ownerUsername
+            || metadata.album.ownerId !== current.album.ownerId
+            || metadata.links.immichWeb !== current.links.immichWeb) {
+            throw new Error('Blocked save: immutable alum.yaml fields were modified.');
+        }
+
+        // Only owner may edit metadata
+        if (!this.isCurrentUserAlbumOwner(album)) {
+            throw new Error('Blocked save: only the album owner can edit alum.yaml.');
+        }
+
+        // Update album description + #nosync handling
+        const newDescription = this.mergeNoSyncTag(metadata.album.description, metadata.settings.hiddenFromSftp);
+        if ((album.description ?? '') !== newDescription) {
+            await this.immichRequest({
+                method: 'PATCH',
+                endpoint: `albums/${album.id}`,
+                data: JSON.stringify({ description: newDescription }),
+                logAction: 'Update album description/settings',
+            });
+            album.description = newDescription;
+        }
+
+        // Update sharing if changed
+        if (!this.sameSharedUsers(current.sharing.sharedUsers, metadata.sharing.sharedUsers)) {
+            await this.updateAlbumSharing(album, metadata.sharing.sharedUsers);
+        }
+
+        // Refresh this album from API
+        await this.fetchAssetsForAlbum(album);
+    }
+
+    private async updateAlbumSharing(album: ImmichAlbum, sharedUsers: AlbumMetadataSharedUser[]): Promise<void> {
+        const existingUsers = album.albumUsers ?? [];
+        const byUserId = new Map(existingUsers.map(user => [user.userId, user]));
+        const byUsername = new Map(existingUsers.map(user => [user.username.toLowerCase(), user]));
+
+        const nextUsers: Array<{ userId: string; role: string }> = [];
+        for (const sharedUser of sharedUsers) {
+            const normalizedName = sharedUser.username.trim().toLowerCase();
+            const existing = (sharedUser.userId && byUserId.get(sharedUser.userId)) || byUsername.get(normalizedName);
+
+            if (!existing) {
+                throw new Error(`Blocked save: shared user '${sharedUser.username}' is unknown in this album. Add/remove users in Immich UI first.`);
+            }
+
+            nextUsers.push({
+                userId: existing.userId,
+                role: sharedUser.role,
+            });
+        }
+
+        await this.immichRequest({
+            method: 'PUT',
+            endpoint: `albums/${album.id}/users`,
+            data: JSON.stringify({ albumUsers: nextUsers }),
+            logAction: 'Update album sharing',
+        });
+
+        album.albumUsers = nextUsers.map(user => {
+            const existing = byUserId.get(user.userId);
+            return {
+                userId: user.userId,
+                username: existing?.username ?? user.userId,
+                role: user.role,
+            };
+        });
+    }
+
+    private validateAlbumMetadataDocument(input: Record<string, any>): AlbumMetadataDocument {
+        if (!this.isObject(input.album) || !this.isObject(input.sharing) || !this.isObject(input.settings) || !this.isObject(input.links)) {
+            throw new Error('Invalid alum.yaml: missing required root sections (album, sharing, settings, links).');
+        }
+
+        const sharedUsersInput = Array.isArray(input.sharing.sharedUsers) ? input.sharing.sharedUsers : [];
+        const sharedUsers: AlbumMetadataSharedUser[] = sharedUsersInput.map((user, index) => {
+            if (!this.isObject(user)) {
+                throw new Error(`Invalid alum.yaml: sharing.sharedUsers[${index}] must be an object.`);
+            }
+
+            const username = String(user.username ?? '').trim();
+            const role = String(user.role ?? '').trim();
+            const userId = user.userId == null ? undefined : String(user.userId).trim();
+
+            if (!username) {
+                throw new Error(`Invalid alum.yaml: sharing.sharedUsers[${index}].username is required.`);
+            }
+            if (!role) {
+                throw new Error(`Invalid alum.yaml: sharing.sharedUsers[${index}].role is required.`);
+            }
+
+            return { userId, username, role };
+        });
+
+        return {
+            schemaVersion: Number(input.schemaVersion),
+            album: {
+                id: String(input.album.id ?? ''),
+                name: String(input.album.name ?? ''),
+                description: String(input.album.description ?? ''),
+                ownerUsername: String(input.album.ownerUsername ?? ''),
+                ownerId: String(input.album.ownerId ?? ''),
+                createdAt: input.album.createdAt ? String(input.album.createdAt) : undefined,
+                updatedAt: input.album.updatedAt ? String(input.album.updatedAt) : undefined,
+            },
+            sharing: {
+                canEditSharedUsers: Boolean(input.sharing.canEditSharedUsers),
+                sharedUsers,
+            },
+            settings: {
+                hiddenFromSftp: Boolean(input.settings.hiddenFromSftp),
+            },
+            links: {
+                immichWeb: String(input.links.immichWeb ?? ''),
+            },
+        };
+    }
+
+    private sameSharedUsers(a: AlbumMetadataSharedUser[], b: AlbumMetadataSharedUser[]): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+
+        const normalize = (entries: AlbumMetadataSharedUser[]) => entries
+            .map(entry => `${(entry.userId ?? '').toLowerCase()}|${entry.username.toLowerCase()}|${entry.role.toLowerCase()}`)
+            .sort();
+
+        const left = normalize(a);
+        const right = normalize(b);
+        return left.every((value, index) => value === right[index]);
+    }
+
+    private hasNoSyncTag(description: string | undefined): boolean {
+        return (description ?? '').includes(NOSYNC_TAG);
+    }
+
+    private stripNoSyncTag(description: string): string {
+        return description
+            .replace(new RegExp(`(?:^|\\s+)${NOSYNC_TAG}(?=\\s+|$)`, 'g'), ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    private mergeNoSyncTag(descriptionWithoutTag: string, hiddenFromSftp: boolean): string {
+        const cleaned = this.stripNoSyncTag(descriptionWithoutTag);
+        if (!hiddenFromSftp) {
+            return cleaned;
+        }
+
+        return cleaned ? `${cleaned} ${NOSYNC_TAG}` : NOSYNC_TAG;
+    }
+
+    private isCurrentUserAlbumOwner(album: ImmichAlbum): boolean {
+        if (!this.currentUser) {
+            return false;
+        }
+
+        if (album.ownerId && this.currentUser.id && album.ownerId === this.currentUser.id) {
+            return true;
+        }
+
+        const currentCandidates = [this.currentUser.username, this.currentUser.email]
+            .filter((value): value is string => Boolean(value))
+            .map(value => value.toLowerCase());
+
+        const ownerCandidates = [album.ownerUsername, album.ownerEmail]
+            .filter((value): value is string => Boolean(value))
+            .map(value => value.toLowerCase());
+
+        return ownerCandidates.some(ownerCandidate => currentCandidates.includes(ownerCandidate));
+    }
+
+    private getAlbumMtime(album: ImmichAlbum): number {
+        const timestamp = album.updatedAt ? new Date(album.updatedAt).getTime() : 0;
+        return Number.isFinite(timestamp) && timestamp > 0 ? Math.floor(timestamp / 1000) : 0;
+    }
+
+    private extractCurrentUser(rawUser: any, fallbackUsername: string): ImmichUser {
+        if (!this.isObject(rawUser)) {
+            return {
+                id: '',
+                username: fallbackUsername,
+                email: fallbackUsername,
+            };
+        }
+
+        const usernameCandidate = this.extractUsername(rawUser) || fallbackUsername;
+        return {
+            id: String(rawUser.id ?? ''),
+            username: usernameCandidate,
+            email: String(rawUser.email ?? fallbackUsername),
+        };
+    }
+
+    private mapAlbumFromApi(item: any): ImmichAlbum {
+        const owner = this.isObject(item?.owner) ? item.owner : null;
+
+        return {
+            id: String(item.id),
+            albumName: String(item.albumName),
+            description: String(item.description ?? ''),
+            ownerId: owner ? String(owner.id ?? '') : String(item.ownerId ?? ''),
+            ownerUsername: owner ? this.extractUsername(owner) : String(item.ownerName ?? item.ownerEmail ?? ''),
+            ownerEmail: owner ? String(owner.email ?? '') : String(item.ownerEmail ?? ''),
+            createdAt: item.createdAt ? String(item.createdAt) : undefined,
+            updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
+            albumUsers: this.mapAlbumUsers(item.albumUsers),
+        };
+    }
+
+    private applyAlbumDetails(album: ImmichAlbum, details: any): void {
+        const owner = this.isObject(details?.owner) ? details.owner : null;
+
+        album.description = String(details?.description ?? album.description ?? '');
+        album.ownerId = owner ? String(owner.id ?? album.ownerId ?? '') : String(details?.ownerId ?? album.ownerId ?? '');
+        album.ownerUsername = owner ? this.extractUsername(owner) : String(details?.ownerName ?? details?.ownerEmail ?? album.ownerUsername ?? '');
+        album.ownerEmail = owner ? String(owner.email ?? album.ownerEmail ?? '') : String(details?.ownerEmail ?? album.ownerEmail ?? '');
+        album.createdAt = details?.createdAt ? String(details.createdAt) : album.createdAt;
+        album.updatedAt = details?.updatedAt ? String(details.updatedAt) : album.updatedAt;
+        album.albumUsers = this.mapAlbumUsers(details?.albumUsers);
+    }
+
+    private mapAlbumUsers(rawAlbumUsers: any): ImmichAlbumUser[] {
+        if (!Array.isArray(rawAlbumUsers)) {
+            return [];
+        }
+
+        return rawAlbumUsers
+            .map((albumUser: any): ImmichAlbumUser | null => {
+                const userRaw = this.isObject(albumUser?.user) ? albumUser.user : albumUser;
+                if (!this.isObject(userRaw)) {
+                    return null;
+                }
+
+                const userId = String(userRaw.id ?? albumUser?.userId ?? '').trim();
+                const username = this.extractUsername(userRaw);
+                if (!userId || !username) {
+                    return null;
+                }
+
+                return {
+                    userId,
+                    username,
+                    role: String(albumUser?.role ?? 'viewer'),
+                };
+            })
+            .filter((entry): entry is ImmichAlbumUser => entry !== null);
+    }
+
+    private extractUsername(user: Record<string, any>): string {
+        return String(user.name ?? user.username ?? user.email ?? user.id ?? '').trim();
+    }
+
+    private isObject(value: unknown): value is Record<string, any> {
+        return typeof value === 'object' && value !== null && !Array.isArray(value);
+    }
 
     // Remove trailing slashes from the Immich host URL
     private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
-    private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
+    private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
         try {
             console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, this.filterLogData(data));
 
@@ -538,7 +981,25 @@ interface ImmichAlbum {
     id: string;
     albumName: string;
     description: string;
+    ownerId?: string;
+    ownerUsername?: string;
+    ownerEmail?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    albumUsers?: ImmichAlbumUser[];
     assets?: ImmichAsset[];
+}
+
+interface ImmichAlbumUser {
+    userId: string;
+    username: string;
+    role: string;
+}
+
+interface ImmichUser {
+    id: string;
+    username: string;
+    email?: string;
 }
 
 interface ImmichAsset {
@@ -548,4 +1009,33 @@ interface ImmichAsset {
     fileModifiedAt: string;
     fileSizeInByte: number;
     isTrashed: boolean;
+}
+
+interface AlbumMetadataDocument {
+    schemaVersion: number;
+    album: {
+        id: string;
+        name: string;
+        description: string;
+        ownerUsername?: string;
+        ownerId?: string;
+        createdAt?: string;
+        updatedAt?: string;
+    };
+    sharing: {
+        canEditSharedUsers: boolean;
+        sharedUsers: AlbumMetadataSharedUser[];
+    };
+    settings: {
+        hiddenFromSftp: boolean;
+    };
+    links: {
+        immichWeb: string;
+    };
+}
+
+interface AlbumMetadataSharedUser {
+    userId?: string;
+    username: string;
+    role: string;
 }
