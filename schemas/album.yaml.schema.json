@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/justFreddy/immich-sftp-server/schemas/album.yaml.schema.json",
+  "title": "Immich SFTP album.yaml",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "album", "sharing", "settings", "links"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "album": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "ownerUsername", "ownerId"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "ownerUsername": { "type": "string", "minLength": 1 },
+        "ownerId": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "sharing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canEditSharedUsers", "sharedUsers"],
+      "properties": {
+        "canEditSharedUsers": { "type": "boolean" },
+        "sharedUsers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["username", "role"],
+            "properties": {
+              "userId": { "type": "string", "minLength": 1 },
+              "username": { "type": "string", "minLength": 1 },
+              "role": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hiddenFromSftp"],
+      "properties": {
+        "hiddenFromSftp": { "type": "boolean" }
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["immichWeb"],
+      "properties": {
+        "immichWeb": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    }
+  }
+}

@@ -11,8 +11,8 @@ import { DateTime } from 'luxon';
 import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstützt, es geht dann nur noch als ES module.
 import YAML from 'yaml';
 
-const ALBUM_METADATA_FILE_NAMES = new Set(['alum.yaml', 'album.yaml']);
-const ALBUM_METADATA_PRIMARY_FILE_NAME = 'alum.yaml';
+const ALBUM_METADATA_FILE_NAMES = new Set(['album.yaml']);
+const ALBUM_METADATA_PRIMARY_FILE_NAME = 'album.yaml';
 const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
 const NOSYNC_TAG = '#nosync';
 
@@ -643,7 +643,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private async applyAlbumMetadataFileContent(album: ImmichAlbum, content: string): Promise<void> {
         const parsed = YAML.parse(content);
         if (!this.isObject(parsed)) {
-            throw new Error('Invalid alum.yaml: expected a YAML object.');
+            throw new Error('Invalid album.yaml: expected a YAML object.');
         }
 
         const metadata = this.validateAlbumMetadataDocument(parsed);
@@ -656,12 +656,12 @@ export class ImmichFileSystem implements VirtualFileSystem {
             || metadata.album.ownerUsername !== current.album.ownerUsername
             || metadata.album.ownerId !== current.album.ownerId
             || metadata.links.immichWeb !== current.links.immichWeb) {
-            throw new Error('Blocked save: immutable alum.yaml fields were modified.');
+            throw new Error('Blocked save: immutable album.yaml fields were modified.');
         }
 
         // Only owner may edit metadata
         if (!this.isCurrentUserAlbumOwner(album)) {
-            throw new Error('Blocked save: only the album owner can edit alum.yaml.');
+            throw new Error('Blocked save: only the album owner can edit album.yaml.');
         }
 
         // Update album description + #nosync handling
@@ -724,13 +724,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
     private validateAlbumMetadataDocument(input: Record<string, any>): AlbumMetadataDocument {
         if (!this.isObject(input.album) || !this.isObject(input.sharing) || !this.isObject(input.settings) || !this.isObject(input.links)) {
-            throw new Error('Invalid alum.yaml: missing required root sections (album, sharing, settings, links).');
+            throw new Error('Invalid album.yaml: missing required root sections (album, sharing, settings, links).');
         }
 
         const sharedUsersInput = Array.isArray(input.sharing.sharedUsers) ? input.sharing.sharedUsers : [];
         const sharedUsers: AlbumMetadataSharedUser[] = sharedUsersInput.map((user, index) => {
             if (!this.isObject(user)) {
-                throw new Error(`Invalid alum.yaml: sharing.sharedUsers[${index}] must be an object.`);
+                throw new Error(`Invalid album.yaml: sharing.sharedUsers[${index}] must be an object.`);
             }
 
             const username = String(user.username ?? '').trim();
@@ -738,10 +738,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
             const userId = user.userId == null ? undefined : String(user.userId).trim();
 
             if (!username) {
-                throw new Error(`Invalid alum.yaml: sharing.sharedUsers[${index}].username is required.`);
+                throw new Error(`Invalid album.yaml: sharing.sharedUsers[${index}].username is required.`);
             }
             if (!role) {
-                throw new Error(`Invalid alum.yaml: sharing.sharedUsers[${index}].role is required.`);
+                throw new Error(`Invalid album.yaml: sharing.sharedUsers[${index}].role is required.`);
             }
 
             return { userId, username, role };

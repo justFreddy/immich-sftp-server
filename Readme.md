@@ -42,6 +42,16 @@ The file list you see is completely built from the metadata stored in Immich:
 - **Modified time:** datetime from the asset
 - **Size:** file size of the asset
 
+### Album metadata files
+
+Each album folder also contains:
+
+- `album.yaml`: album settings + metadata (id, owner, shared users/roles, links, etc.)
+- `immich.url`: browser shortcut to open the album in Immich
+
+`album.yaml` is validated against `schemas/album.yaml.schema.json`.
+If a user edits fields they are not allowed to change, save is blocked and an error is returned to the SFTP client.
+
 ### Uploads 
 
 Uploading files to SFTP is handled by the following rules:
@@ -152,4 +162,3 @@ Use any SFTP client:
   - the same album name is used multiple times
 - If an album contains multiple assets with the **same original filename**, SFTP clients may not handle it well. Technically this is possible in Immich — try to prevent it.
 - You can’t create subfolders, because nested albums are not possible in Immich.
-
