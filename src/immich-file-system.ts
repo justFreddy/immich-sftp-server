@@ -15,6 +15,7 @@ const ALBUM_METADATA_FILE_NAMES = new Set(['album.yaml']);
 const ALBUM_METADATA_PRIMARY_FILE_NAME = 'album.yaml';
 const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
 const NOSYNC_TAG = '#nosync';
+const NOSYNC_TAG_REGEX = new RegExp(`(?:^|\\s+)${NOSYNC_TAG}(?=\\s+|$)`, 'g');
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -437,9 +438,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
         //Process and filter albums
         return this.filterAlbums(response);
     }
-    private filterAlbums(response: any) {
+    private filterAlbums(response: unknown) {
+        if (!Array.isArray(response)) {
+            return [];
+        }
+
         // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => this.mapAlbumFromApi(item));
+        const albums: ImmichAlbum[] = response.map((item): ImmichAlbum => this.mapAlbumFromApi(item as ImmichAlbumApiResponse));
 
         // Filter out albums whose description contains "#nosync"
         let filteredAlbums = albums.filter(album => !album.description?.includes(NOSYNC_TAG));
@@ -690,7 +695,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const byUserId = new Map(existingUsers.map(user => [user.userId, user]));
         const byUsername = new Map(existingUsers.map(user => [user.username.toLowerCase(), user]));
 
-        const nextUsers: Array<{ userId: string; role: string }> = [];
+        const updatedSharedUsers: Array<{ userId: string; role: string }> = [];
         for (const sharedUser of sharedUsers) {
             const normalizedName = sharedUser.username.trim().toLowerCase();
             const existing = (sharedUser.userId && byUserId.get(sharedUser.userId)) || byUsername.get(normalizedName);
@@ -699,7 +704,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 throw new Error(`Blocked save: shared user '${sharedUser.username}' is unknown in this album. Add/remove users in Immich UI first.`);
             }
 
-            nextUsers.push({
+            updatedSharedUsers.push({
                 userId: existing.userId,
                 role: sharedUser.role,
             });
@@ -708,11 +713,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
         await this.immichRequest({
             method: 'PUT',
             endpoint: `albums/${album.id}/users`,
-            data: JSON.stringify({ albumUsers: nextUsers }),
+            data: JSON.stringify({ albumUsers: updatedSharedUsers }),
             logAction: 'Update album sharing',
         });
 
-        album.albumUsers = nextUsers.map(user => {
+        album.albumUsers = updatedSharedUsers.map(user => {
             const existing = byUserId.get(user.userId);
             return {
                 userId: user.userId,
@@ -777,7 +782,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         const normalize = (entries: AlbumMetadataSharedUser[]) => entries
-            .map(entry => `${(entry.userId ?? '').toLowerCase()}|${entry.username.toLowerCase()}|${entry.role.toLowerCase()}`)
+            .map(entry => JSON.stringify({
+                userId: (entry.userId ?? '').toLowerCase(),
+                username: entry.username.toLowerCase(),
+                role: entry.role.toLowerCase(),
+            }))
             .sort();
 
         const left = normalize(a);
@@ -791,7 +800,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
     private stripNoSyncTag(description: string): string {
         return description
-            .replace(new RegExp(`(?:^|\\s+)${NOSYNC_TAG}(?=\\s+|$)`, 'g'), ' ')
+            .replace(NOSYNC_TAG_REGEX, ' ')
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -847,7 +856,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         };
     }
 
-    private mapAlbumFromApi(item: any): ImmichAlbum {
+    private mapAlbumFromApi(item: ImmichAlbumApiResponse): ImmichAlbum {
         const owner = this.isObject(item?.owner) ? item.owner : null;
 
         return {
@@ -1038,4 +1047,17 @@ interface AlbumMetadataSharedUser {
     userId?: string;
     username: string;
     role: string;
+}
+
+interface ImmichAlbumApiResponse {
+    id: string;
+    albumName: string;
+    description?: string;
+    owner?: Record<string, unknown>;
+    ownerId?: string;
+    ownerName?: string;
+    ownerEmail?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    albumUsers?: unknown[];
 }
