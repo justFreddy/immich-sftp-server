@@ -408,7 +408,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
             });
             this.currentUser = this.extractCurrentUser(me, fallbackUsername);
         } catch (error) {
-            console.warn('Could not fetch current user, falling back to login username.');
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.warn(`Could not fetch current user (${errorMessage}), falling back to login username.`);
             this.currentUser = {
                 id: '',
                 username: fallbackUsername,
@@ -747,7 +748,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return Math.floor(createdTimestamp / 1000);
         }
 
-        console.warn(`Album '${album.albumName}' has invalid timestamps, using current time as mtime fallback.`);
+        console.warn(`Album '${album.albumName}' has missing/invalid createdAt and updatedAt timestamps, using current time as mtime fallback.`);
         return Math.floor(Date.now() / 1000);
     }
 
