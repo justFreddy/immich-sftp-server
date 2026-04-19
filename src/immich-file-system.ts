@@ -748,7 +748,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private buildPreferredAssetName(asset: ImmichAsset): string {
         const extension = path.extname(asset.originalFileName);
         const timestamp = this.getAssetMtime(asset);
-        const formattedTimestamp = DateTime.fromSeconds(timestamp, { zone: config.TZ }).toFormat('yyyyLLdd_HHmmssSSS');
+        const dt = DateTime.fromSeconds(timestamp, { zone: config.TZ });
+        const formattedTimestamp = `${dt.toFormat('yyyyLLdd_HHmmss')}${String(dt.millisecond).padStart(3, '0')}`;
         const shortId = asset.id.slice(0, 8);
 
         switch (config.assetFileNamePattern) {
