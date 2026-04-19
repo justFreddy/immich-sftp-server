@@ -15,7 +15,7 @@ const ALBUM_METADATA_FILE_NAMES = new Set(['album.yaml']);
 const ALBUM_METADATA_PRIMARY_FILE_NAME = 'album.yaml';
 const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
 const NOSYNC_TAG = '#nosync';
-const NOSYNC_TAG_REGEX = new RegExp(`(?:^|\\s)${NOSYNC_TAG}(?:\\s|$)`, 'g');
+const NOSYNC_TAG_REGEX = /(?:^|\s)#nosync(?:\s|$)/g;
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -440,6 +440,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     private filterAlbums(response: unknown) {
         if (!Array.isArray(response)) {
+            console.warn('Unexpected albums response format, expected array.');
             return [];
         }
 
@@ -730,7 +731,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
     }
 
-    private validateAlbumMetadataDocument(input: Record<string, any>): AlbumMetadataDocument {
+    private validateAlbumMetadataDocument(input: Record<string, unknown>): AlbumMetadataDocument {
         if (!this.isObject(input.album) || !this.isObject(input.sharing) || !this.isObject(input.settings) || !this.isObject(input.links)) {
             throw new Error('Invalid album.yaml: missing required root sections (album, sharing, settings, links).');
         }
@@ -864,6 +865,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return Math.floor(createdTimestamp / 1000);
         }
 
+        console.warn(`Album '${album.albumName}' has invalid timestamps, using current time as mtime fallback.`);
         return Math.floor(Date.now() / 1000);
     }
 
@@ -951,7 +953,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return String(user.name ?? user.username ?? user.email ?? user.id ?? '').trim();
     }
 
-    private isObject(value: unknown): value is Record<string, any> {
+    private isObject(value: unknown): value is Record<string, unknown> {
         return typeof value === 'object' && value !== null && !Array.isArray(value);
     }
 
@@ -998,7 +1000,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
 
-    private filterLogData(data: any): any {
+    private filterLogData(data: unknown): unknown {
         // Filter sensitive data from the log
         if (Buffer.isBuffer(data)) {
             return '[Binary Data]'; // Mask the binary data as '[Binary Data]'
