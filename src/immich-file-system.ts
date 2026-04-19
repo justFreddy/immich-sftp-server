@@ -9,13 +9,21 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { DateTime } from 'luxon';
 import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstützt, es geht dann nur noch als ES module.
-import YAML from 'yaml';
-
-const ALBUM_METADATA_FILE_NAMES = new Set(['album.yaml']);
-const ALBUM_METADATA_PRIMARY_FILE_NAME = 'album.yaml';
-const ALBUM_BROWSER_LINK_FILE_NAME = 'immich.url';
-const NOSYNC_TAG = '#nosync';
-const NOSYNC_TAG_REGEX = /(?:^|\s)#nosync(?:\s|$)/g;
+import {
+    ALBUM_METADATA_FILE_NAME,
+    ALBUM_BROWSER_LINK_FILE_NAME,
+    AlbumMetadataSharedUser,
+    buildAlbumBrowserLink,
+    buildAlbumMetadataDocument,
+    buildAlbumMetadataYaml,
+    getChangedImmutableAlbumMetadataFields,
+    hasNoSyncTag,
+    isAlbumBrowserLinkFileName,
+    isAlbumMetadataFileName,
+    mergeNoSyncTag,
+    parseAndValidateAlbumMetadataYaml,
+    sameSharedUsers
+} from './album-metadata';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -194,7 +202,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 const linkContent = this.buildAlbumBrowserLink(album);
 
                 files.push({
-                    name: ALBUM_METADATA_PRIMARY_FILE_NAME,
+                    name: ALBUM_METADATA_FILE_NAME,
                     isDir: false,
                     size: Buffer.byteLength(metadataContent, 'utf8'),
                     mtime: this.getAlbumMtime(album),
@@ -448,7 +456,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const albums: ImmichAlbum[] = response.map((item): ImmichAlbum => this.mapAlbumFromApi(item as ImmichAlbumApiResponse));
 
         // Filter out albums whose description contains "#nosync"
-        let filteredAlbums = albums.filter(album => !album.description?.includes(NOSYNC_TAG));
+        let filteredAlbums = albums.filter(album => !hasNoSyncTag(album.description));
 
         // Filter out albums with empty or invalid names
         filteredAlbums = filteredAlbums.filter(album => isValidFilename(album.albumName));
@@ -586,7 +594,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private isAlbumMetadataFilePath(filePath: string): boolean {
         try {
             const pathInfo = this.extractPathInfo(filePath);
-            return pathInfo.fileName !== null && ALBUM_METADATA_FILE_NAMES.has(pathInfo.fileName);
+            return isAlbumMetadataFileName(pathInfo.fileName);
         } catch {
             return false;
         }
@@ -594,7 +602,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private isAlbumBrowserLinkFilePath(filePath: string): boolean {
         try {
             const pathInfo = this.extractPathInfo(filePath);
-            return pathInfo.fileName === ALBUM_BROWSER_LINK_FILE_NAME;
+            return isAlbumBrowserLinkFileName(pathInfo.fileName);
         } catch {
             return false;
         }
@@ -610,59 +618,36 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     private buildAlbumMetadataYaml(album: ImmichAlbum): string {
-        return YAML.stringify(this.buildAlbumMetadataDocument(album));
-    }
-
-    private buildAlbumMetadataDocument(album: ImmichAlbum): AlbumMetadataDocument {
-        return {
-            schemaVersion: 1,
-            album: {
-                id: album.id,
-                name: album.albumName,
-                description: this.stripNoSyncTag(album.description ?? ''),
-                ownerUsername: album.ownerUsername ?? '',
-                ownerId: album.ownerId ?? '',
-                createdAt: album.createdAt,
-                updatedAt: album.updatedAt,
-            },
-            sharing: {
-                canEditSharedUsers: this.isCurrentUserAlbumOwner(album),
-                sharedUsers: (album.albumUsers ?? []).map(user => ({
-                    userId: user.userId,
-                    username: user.username,
-                    role: user.role,
-                })),
-            },
-            settings: {
-                hiddenFromSftp: this.hasNoSyncTag(album.description),
-            },
-            links: {
-                immichWeb: `${this.baseUrl}/albums/${album.id}`,
-            },
-        };
+        return buildAlbumMetadataYaml({
+            id: album.id,
+            name: album.albumName,
+            description: album.description,
+            ownerUsername: album.ownerUsername,
+            ownerId: album.ownerId,
+            createdAt: album.createdAt,
+            updatedAt: album.updatedAt,
+            sharedUsers: album.albumUsers,
+        }, this.isCurrentUserAlbumOwner(album), this.baseUrl);
     }
 
     private buildAlbumBrowserLink(album: ImmichAlbum): string {
-        return `[InternetShortcut]\nURL=${this.baseUrl}/albums/${album.id}\n`;
+        return buildAlbumBrowserLink(this.baseUrl, album.id);
     }
 
     private async applyAlbumMetadataFileContent(album: ImmichAlbum, content: string): Promise<void> {
-        const parsed = YAML.parse(content);
-        if (!this.isObject(parsed)) {
-            throw new Error('Invalid album.yaml: expected a YAML object.');
-        }
+        const metadata = parseAndValidateAlbumMetadataYaml(content);
+        const current = buildAlbumMetadataDocument({
+            id: album.id,
+            name: album.albumName,
+            description: album.description,
+            ownerUsername: album.ownerUsername,
+            ownerId: album.ownerId,
+            createdAt: album.createdAt,
+            updatedAt: album.updatedAt,
+            sharedUsers: album.albumUsers,
+        }, this.isCurrentUserAlbumOwner(album), this.baseUrl);
 
-        const metadata = this.validateAlbumMetadataDocument(parsed);
-        const current = this.buildAlbumMetadataDocument(album);
-
-        // Immutable fields
-        const changedImmutableFields: string[] = [];
-        if (metadata.schemaVersion !== current.schemaVersion) changedImmutableFields.push('schemaVersion');
-        if (metadata.album.id !== current.album.id) changedImmutableFields.push('album.id');
-        if (metadata.album.name !== current.album.name) changedImmutableFields.push('album.name');
-        if (metadata.album.ownerUsername !== current.album.ownerUsername) changedImmutableFields.push('album.ownerUsername');
-        if (metadata.album.ownerId !== current.album.ownerId) changedImmutableFields.push('album.ownerId');
-        if (metadata.links.immichWeb !== current.links.immichWeb) changedImmutableFields.push('links.immichWeb');
+        const changedImmutableFields = getChangedImmutableAlbumMetadataFields(current, metadata);
 
         if (changedImmutableFields.length > 0) {
             throw new Error(`Blocked save: immutable album.yaml fields were modified (${changedImmutableFields.join(', ')}).`);
@@ -674,7 +659,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Update album description + #nosync handling
-        const newDescription = this.mergeNoSyncTag(metadata.album.description, metadata.settings.hiddenFromSftp);
+        const newDescription = mergeNoSyncTag(metadata.album.description, metadata.settings.hiddenFromSftp);
         if ((album.description ?? '') !== newDescription) {
             await this.immichRequest({
                 method: 'PATCH',
@@ -686,7 +671,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Update sharing if changed
-        if (!this.sameSharedUsers(current.sharing.sharedUsers, metadata.sharing.sharedUsers)) {
+        if (!sameSharedUsers(current.sharing.sharedUsers, metadata.sharing.sharedUsers)) {
             await this.updateAlbumSharing(album, metadata.sharing.sharedUsers);
         }
 
@@ -729,109 +714,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 role: user.role,
             };
         });
-    }
-
-    private validateAlbumMetadataDocument(input: Record<string, unknown>): AlbumMetadataDocument {
-        if (!this.isObject(input.album) || !this.isObject(input.sharing) || !this.isObject(input.settings) || !this.isObject(input.links)) {
-            throw new Error('Invalid album.yaml: missing required root sections (album, sharing, settings, links).');
-        }
-
-        const sharedUsersInput = Array.isArray(input.sharing.sharedUsers) ? input.sharing.sharedUsers : [];
-        const sharedUsers: AlbumMetadataSharedUser[] = sharedUsersInput.map((user, index) => {
-            if (!this.isObject(user)) {
-                throw new Error(`Invalid album.yaml: sharing.sharedUsers[${index}] must be an object.`);
-            }
-
-            const username = String(user.username ?? '').trim();
-            const role = String(user.role ?? '').trim();
-            const userId = user.userId == null ? undefined : String(user.userId).trim();
-
-            if (!username) {
-                throw new Error(`Invalid album.yaml: sharing.sharedUsers[${index}].username is required.`);
-            }
-            if (!role) {
-                throw new Error(`Invalid album.yaml: sharing.sharedUsers[${index}].role is required.`);
-            }
-
-            return { userId, username, role };
-        });
-
-        return {
-            schemaVersion: Number(input.schemaVersion),
-            album: {
-                id: String(input.album.id ?? ''),
-                name: String(input.album.name ?? ''),
-                description: String(input.album.description ?? ''),
-                ownerUsername: String(input.album.ownerUsername ?? ''),
-                ownerId: String(input.album.ownerId ?? ''),
-                createdAt: input.album.createdAt ? String(input.album.createdAt) : undefined,
-                updatedAt: input.album.updatedAt ? String(input.album.updatedAt) : undefined,
-            },
-            sharing: {
-                canEditSharedUsers: Boolean(input.sharing.canEditSharedUsers),
-                sharedUsers,
-            },
-            settings: {
-                hiddenFromSftp: Boolean(input.settings.hiddenFromSftp),
-            },
-            links: {
-                immichWeb: String(input.links.immichWeb ?? ''),
-            },
-        };
-    }
-
-    private sameSharedUsers(a: AlbumMetadataSharedUser[], b: AlbumMetadataSharedUser[]): boolean {
-        if (a.length !== b.length) {
-            return false;
-        }
-
-        const normalize = (entries: AlbumMetadataSharedUser[]) => entries
-            .map(entry => ({
-                userId: (entry.userId ?? '').toLowerCase(),
-                username: entry.username.toLowerCase(),
-                role: entry.role.toLowerCase(),
-            }))
-            .sort((left, right) => {
-                const byUserId = left.userId.localeCompare(right.userId);
-                if (byUserId !== 0) {
-                    return byUserId;
-                }
-
-                const byUsername = left.username.localeCompare(right.username);
-                if (byUsername !== 0) {
-                    return byUsername;
-                }
-
-                return left.role.localeCompare(right.role);
-            });
-
-        const left = normalize(a);
-        const right = normalize(b);
-        return left.every((entry, index) =>
-            entry.userId === right[index].userId
-            && entry.username === right[index].username
-            && entry.role === right[index].role
-        );
-    }
-
-    private hasNoSyncTag(description: string | undefined): boolean {
-        return (description ?? '').includes(NOSYNC_TAG);
-    }
-
-    private stripNoSyncTag(description: string): string {
-        return description
-            .replace(NOSYNC_TAG_REGEX, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-    }
-
-    private mergeNoSyncTag(descriptionText: string, hiddenFromSftp: boolean): string {
-        const cleaned = this.stripNoSyncTag(descriptionText);
-        if (!hiddenFromSftp) {
-            return cleaned;
-        }
-
-        return cleaned ? `${cleaned} ${NOSYNC_TAG}` : NOSYNC_TAG;
     }
 
     private isCurrentUserAlbumOwner(album: ImmichAlbum): boolean {
@@ -1056,35 +938,6 @@ interface ImmichAsset {
     fileModifiedAt: string;
     fileSizeInByte: number;
     isTrashed: boolean;
-}
-
-interface AlbumMetadataDocument {
-    schemaVersion: number;
-    album: {
-        id: string;
-        name: string;
-        description: string;
-        ownerUsername?: string;
-        ownerId?: string;
-        createdAt?: string;
-        updatedAt?: string;
-    };
-    sharing: {
-        canEditSharedUsers: boolean;
-        sharedUsers: AlbumMetadataSharedUser[];
-    };
-    settings: {
-        hiddenFromSftp: boolean;
-    };
-    links: {
-        immichWeb: string;
-    };
-}
-
-interface AlbumMetadataSharedUser {
-    userId?: string;
-    username: string;
-    role: string;
 }
 
 interface ImmichAlbumApiResponse {
