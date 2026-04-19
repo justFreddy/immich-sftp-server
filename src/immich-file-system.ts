@@ -33,6 +33,8 @@ import {
     buildAlbumMetadataYamlForAlbum
 } from './immich-album-virtual-file-service';
 
+const DEFAULT_ASSET_BASE_NAME = 'asset';
+
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
 
@@ -746,7 +748,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private buildPreferredAssetName(asset: ImmichAsset): string {
         const extension = path.extname(asset.originalFileName);
         const timestamp = this.getAssetMtime(asset);
-        const timestampPart = DateTime.fromSeconds(timestamp, { zone: config.TZ }).toFormat('yyyyLLdd_HHmmssSSS');
+        const formattedTimestamp = DateTime.fromSeconds(timestamp, { zone: config.TZ }).toFormat('yyyyLLdd_HHmmssSSS');
         const shortId = asset.id.slice(0, 8);
 
         switch (config.assetFileNamePattern) {
@@ -755,9 +757,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
             case 'shortUuid':
                 return `img_${shortId}${extension}`;
             case 'date':
-                return `${timestampPart}${extension}`;
+                return `${formattedTimestamp}${extension}`;
             case 'dateUuid':
-                return `${timestampPart}_${shortId}${extension}`;
+                return `${formattedTimestamp}_${shortId}${extension}`;
             case 'original':
             default:
                 return asset.originalFileName;
@@ -771,7 +773,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         const parsed = path.parse(preferredName);
         const shortId = asset.id.slice(0, 8);
-        const base = parsed.name || 'asset';
+        const base = parsed.name || DEFAULT_ASSET_BASE_NAME;
         const ext = parsed.ext || path.extname(asset.originalFileName);
 
         let candidate = `${base}__${shortId}${ext}`;

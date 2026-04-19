@@ -189,7 +189,7 @@ export const config = (() => {
     ftpPassivePortMax,
     enableSftp: getEnvBoolean('ENABLE_SFTP', true),
     enableFtp: getEnvBoolean('ENABLE_FTP', false),
-    assetFileNamePattern: envFileNamePattern ?? yamlFileNamePattern ?? 'original' as AssetFileNamePattern,
-    assetDownloadSource: envDownloadSource ?? yamlDownloadSource ?? 'original' as AssetDownloadSource,
+    assetFileNamePattern: envFileNamePattern ?? yamlFileNamePattern ?? 'original',
+    assetDownloadSource: envDownloadSource ?? yamlDownloadSource ?? 'original',
   };
 })();
