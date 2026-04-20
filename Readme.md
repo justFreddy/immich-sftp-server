@@ -122,6 +122,7 @@ services:
     environment:
       IMMICH_HOST: https://<your-immich-server-fqdn>:<immich-port>
       TZ: <your TZ>
+      HOST_KEY_DIR: "/data/ssh-host-key"
       ENABLE_SFTP: "true"
       ENABLE_FTP: "false"
       ENABLE_WEBDAV: "false"
