@@ -1,10 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { execFileSync } = require('node:child_process');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const path = require('node:path');
 
 const immichFileSystemModulePath = path.resolve(__dirname, '..', 'dist', 'immich-file-system.js');
+const execFileAsync = promisify(execFile);
 
 test('token login via username supports bearer tokens', async () => {
   const requests = [];
@@ -26,7 +28,7 @@ test('token login via username supports bearer tokens', async () => {
   });
 
   try {
-    runImmichSession(server.baseUrl, 'bearer-token-value', '');
+    await runImmichSession(server.baseUrl, 'bearer-token-value', '');
   } finally {
     await server.close();
   }
@@ -60,7 +62,7 @@ test('token login via username supports API keys', async () => {
   });
 
   try {
-    runImmichSession(server.baseUrl, 'immich-api-key-value', '');
+    await runImmichSession(server.baseUrl, 'immich-api-key-value', '');
   } finally {
     await server.close();
   }
@@ -98,7 +100,7 @@ test('email/password login keeps auth/login flow', async () => {
   });
 
   try {
-    runImmichSession(server.baseUrl, 'user@example.com', 'secret');
+    await runImmichSession(server.baseUrl, 'user@example.com', 'secret');
   } finally {
     await server.close();
   }
@@ -108,7 +110,7 @@ test('email/password login keeps auth/login flow', async () => {
   assert.ok(requests.some((r) => r.method === 'POST' && r.url === '/api/auth/logout' && r.headers.authorization === 'Bearer session-token'));
 });
 
-function runImmichSession(immichHost, username, password) {
+async function runImmichSession(immichHost, username, password) {
   const script = `
 const { ImmichFileSystem } = require(${JSON.stringify(immichFileSystemModulePath)});
 (async () => {
@@ -122,7 +124,7 @@ const { ImmichFileSystem } = require(${JSON.stringify(immichFileSystemModulePath
 });
 `;
 
-  execFileSync(process.execPath, ['-e', script], {
+  await execFileAsync(process.execPath, ['-e', script], {
     env: {
       ...process.env,
       IMMICH_HOST: immichHost,
