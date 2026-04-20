@@ -44,6 +44,8 @@ const PERSON_METADATA_FILE_NAME = 'person.yaml';
 export class ImmichFileSystem implements VirtualFileSystem {
 
     private immichAccessToken: string = '';
+    private authMode: 'bearer' | 'api-key' = 'bearer';
+    private shouldLogoutSession = false;
     private albumsCache: ImmichAlbum[] = [];
     private tagsCache: ImmichTag[] = [];
     private peopleCache: ImmichPerson[] = [];
@@ -52,33 +54,47 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private collectionVisibilityCache: { tagsEnabled: boolean; peopleEnabled: boolean } | null = null;
 
     async login(username: string, password: string): Promise<void> {
+        const trimmedUsername = username.trim();
+        const trimmedPassword = password.trim();
+
+        if (trimmedUsername === 'apikey') {
+            await this.loginWithApiKey(trimmedPassword);
+            return;
+        }
+
         const loginResp = await this.immichRequest({
             method: 'POST',
             endpoint: 'auth/login',
             data: JSON.stringify({
-                email: username,
-                password: password,
+                email: trimmedUsername,
+                password: trimmedPassword,
             }),
             logAction: 'Login'
         });
 
         // Store the access token
         this.immichAccessToken = loginResp.accessToken;
+        this.authMode = 'bearer';
+        this.shouldLogoutSession = true;
 
         // Try to get current user from login response first
-        this.currentUser = extractCurrentUser(loginResp.user, username);
+        this.currentUser = extractCurrentUser(loginResp.user, trimmedUsername);
 
         // Fallback to users/me endpoint
         if (!this.currentUser?.id || !this.currentUser?.username) {
-            await this.fetchCurrentUser(username);
+            await this.fetchCurrentUser(trimmedUsername);
         }
     }
     async logout(): Promise<void> {
-        await this.immichRequest({
-            method: 'POST',
-            endpoint: 'auth/logout',
-            logAction: 'Logout'
-        });
+        if (this.shouldLogoutSession) {
+            await this.immichRequest({
+                method: 'POST',
+                endpoint: 'auth/logout',
+                logAction: 'Logout'
+            });
+        }
+        this.immichAccessToken = '';
+        this.shouldLogoutSession = false;
         this.currentUser = null;
         this.collectionVisibilityCache = null;
         this.tagsCache = [];
@@ -1350,11 +1366,33 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return tempFile;
     }
 
+    private looksLikeEmail(value: string): boolean {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    }
+
+    private async loginWithApiKey(apiKey: string): Promise<void> {
+        if (!apiKey) {
+            throw new Error('API key login requires a non-empty API key as password.');
+        }
+
+        this.immichAccessToken = apiKey;
+        this.shouldLogoutSession = false;
+        this.authMode = 'api-key';
+
+        const me = await this.immichRequest({
+            method: 'GET',
+            endpoint: 'users/me',
+            logAction: 'Current user (api key)',
+            skipResponseLog: true,
+        });
+        this.currentUser = extractCurrentUser(me, 'api-key');
+    }
+
     // Remove trailing slashes from the Immich host URL
     private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
     private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
         try {
-            console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, this.filterLogData(data));
+            console.log(`Sending (${logAction}): ${method} /api/${endpoint}`);
 
             const isDownload = method === 'GET' && endpoint.startsWith('assets/') && (endpoint.endsWith('/original') || endpoint.endsWith('/thumbnail'));
 
@@ -1364,7 +1402,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 headers: {
                     ...(isDownload ? {} : { 'Accept': 'application/json' }),
                     'User-Agent': 'ImmichNetworkStorage (Linux)',
-                    'Authorization': `Bearer ${this.immichAccessToken}`,
+                    ...(this.authMode === 'api-key'
+                        ? { 'x-api-key': this.immichAccessToken }
+                        : { 'Authorization': `Bearer ${this.immichAccessToken}` }),
                     ...(data instanceof FormData ? data.getHeaders?.() : { 'Content-Type': 'application/json' }),
                 },
                 data: data ?? undefined,
@@ -1405,11 +1445,44 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (data instanceof FormData) {
             return '[FormData]';
         }
+        if (typeof data === 'string') {
+            try {
+                const parsed = JSON.parse(data);
+                return this.redactSensitiveFields(parsed);
+            } catch {
+                // Keep non-JSON string as-is.
+            }
+        }
+        if (typeof data === 'object' && data !== null) {
+            return this.redactSensitiveFields(data);
+        }
         // Handle edge cases where the data might be large and contain binary-like strings.
         if (typeof data === 'string' && /[^\x00-\x7F]/.test(data)) {
             return '[Non-ASCII Text]'; // Mask non-ASCII content as non-readable text
         }
         return data; // Return as is if not an object
+    }
+
+    private redactSensitiveFields(data: unknown): unknown {
+        const sensitiveKeys = new Set(['password', 'token', 'accessToken', 'authorization', 'x-api-key', 'apiKey']);
+
+        if (Array.isArray(data)) {
+            return data.map(item => this.redactSensitiveFields(item));
+        }
+
+        if (typeof data !== 'object' || data === null) {
+            return data;
+        }
+
+        const redacted: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(data)) {
+            if (sensitiveKeys.has(key)) {
+                redacted[key] = '[REDACTED]';
+                continue;
+            }
+            redacted[key] = this.redactSensitiveFields(value);
+        }
+        return redacted;
     }
 
     private getAssetMtime(asset: ImmichAsset): number {
