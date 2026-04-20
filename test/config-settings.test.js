@@ -13,6 +13,7 @@ const { config } = require(${JSON.stringify(configModulePath)});
 process.stdout.write(JSON.stringify({
   enableSmb: config.enableSmb,
   enableWebdav: config.enableWebdav,
+  webdavPort: config.webdavPort,
   assetFileNamePattern: config.assetFileNamePattern,
   assetDownloadSource: config.assetDownloadSource
 }));
@@ -40,6 +41,7 @@ test('asset settings can be read from root YAML file', (t) => {
   assert.deepEqual(config, {
     enableSmb: false,
     enableWebdav: false,
+    webdavPort: 1900,
     assetFileNamePattern: 'shortUuid',
     assetDownloadSource: 'preview',
   });
@@ -58,11 +60,13 @@ test('environment variables override YAML asset settings', (t) => {
     ASSET_DOWNLOAD_SOURCE: 'preview',
     ENABLE_SMB: 'true',
     ENABLE_WEBDAV: '1',
+    WEBDAV_PORT: '8080',
   }, tmpDir);
 
   assert.deepEqual(config, {
     enableSmb: true,
     enableWebdav: true,
+    webdavPort: 8080,
     assetFileNamePattern: 'dateUuid',
     assetDownloadSource: 'preview',
   });

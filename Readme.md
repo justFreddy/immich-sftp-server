@@ -1,6 +1,6 @@
-# Immich SFTP/FTP Server
+# Immich SFTP/FTP/WebDAV Server
 
-An **SFTP/FTP “bridge” for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP or FTP client.
+An **SFTP/FTP/WebDAV “bridge” for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP, FTP, or WebDAV client.
 
 ## Ideas to use this 💡
 
@@ -85,7 +85,7 @@ Any file can be downloaded from SFTP:
 
 ## Deployment (Docker Compose) 🐳
 
-You can run both protocols in parallel. SFTP and FTP can be enabled/disabled independently with environment variables.
+You can run all protocols in parallel. SFTP, FTP, and WebDAV can be enabled/disabled independently with environment variables.
 
 ### Install on the Immich stack (recommended)
 
@@ -115,6 +115,7 @@ services:
  +   ports:
  +    - "22832:22" # SFTP
  +    - "22100:21" # FTP
+ +    - "19000:1900" # WebDAV
  +    - "30000-30010:30000-30010" # FTP passive data ports (optional, if passive mode is enabled)
  +   environment:
  +     IMMICH_HOST: http://immich-server:2283
@@ -125,6 +126,7 @@ services:
  +     ENABLE_WEBDAV: "false"
  +     SFTP_PORT: "22"
  +     FTP_PORT: "21"
+ +     WEBDAV_PORT: "1900"
  +     FTP_PASSIVE_HOST: "your.public.hostname"
  +     FTP_PASSIVE_PORT_MIN: "30000"
  +     FTP_PASSIVE_PORT_MAX: "30010"
@@ -146,6 +148,7 @@ services:
     ports:
       - "22832:22" # SFTP
       - "22100:21" # FTP
+      - "19000:1900" # WebDAV
       - "30000-30010:30000-30010" # FTP passive data ports (optional, if passive mode is enabled)
     environment:
       IMMICH_HOST: https://<your-immich-server-fqdn>:<immich-port>
@@ -156,6 +159,7 @@ services:
       ENABLE_WEBDAV: "false"
       SFTP_PORT: "22"
       FTP_PORT: "21"
+      WEBDAV_PORT: "1900"
       FTP_PASSIVE_HOST: "your.public.hostname"
       FTP_PASSIVE_PORT_MIN: "30000"
       FTP_PASSIVE_PORT_MAX: "30010"
@@ -170,12 +174,13 @@ services:
 - `ENABLE_SFTP` (default: `true`) – enable/disable SFTP server
 - `ENABLE_FTP` (default: `false`) – enable/disable FTP server
 - `ENABLE_SMB` (default: `false`) – enable/disable SMB server (currently not implemented)
-- `ENABLE_WEBDAV` (default: `false`) – enable/disable WebDAV server (currently not implemented)
+- `ENABLE_WEBDAV` (default: `false`) – enable/disable WebDAV server
 - `SFTP_PORT` (default: `22`) – internal SFTP listen port
 - `FTP_PORT` (default: `21`) – internal FTP listen port
+- `WEBDAV_PORT` (default: `1900`) – internal WebDAV listen port
 - `FTP_PASSIVE_HOST` (optional) – hostname or public IP returned to FTP clients for passive mode
 - `FTP_PASSIVE_PORT_MIN` / `FTP_PASSIVE_PORT_MAX` (optional) – passive FTP data port range; set both or neither
-- `LISTEN_HOST` (default: `0.0.0.0`) – bind address for both servers
+- `LISTEN_HOST` (default: `0.0.0.0`) – bind address for all servers
 - `ASSET_FILENAME_PATTERN` (default: `original`) – one of:
   - `original` → original filename
   - `assetUuid`/`asset_uuid`/`uuid` → full asset UUID + original extension
@@ -212,6 +217,14 @@ Or use an FTP client if FTP is enabled:
 - **Port:** `22100` (from the compose example)
 - **Username:** your Immich email
 - **Password:** your Immich password
+
+Or use any WebDAV client if WebDAV is enabled (set `ENABLE_WEBDAV: "true"`):
+
+- **URL:** `http://your-server-hostname:19000` (from the compose example)
+- **Username:** your Immich email
+- **Password:** your Immich password
+
+WebDAV is natively supported by Windows (Map Network Drive → `http://…`), macOS Finder (Go → Connect to Server), and many mobile apps.
 
 ---
 

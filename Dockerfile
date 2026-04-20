@@ -39,9 +39,10 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 
-# Expose SFTP and FTP control ports
+# Expose SFTP, FTP control, and WebDAV ports
 EXPOSE 22
 EXPOSE 21
+EXPOSE 1900
 
 # Default command to run transfer servers bootstrap
 CMD ["node", "dist/server.js"]

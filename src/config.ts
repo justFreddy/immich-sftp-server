@@ -191,6 +191,7 @@ export const config = (() => {
     enableFtp: getEnvBoolean('ENABLE_FTP', false),
     enableSmb: getEnvBoolean('ENABLE_SMB', false),
     enableWebdav: getEnvBoolean('ENABLE_WEBDAV', false),
+    webdavPort: getEnvNumber('WEBDAV_PORT', 1900),
     assetFileNamePattern: envFileNamePattern ?? yamlFileNamePattern ?? 'original',
     assetDownloadSource: envDownloadSource ?? yamlDownloadSource ?? 'original',
   };
