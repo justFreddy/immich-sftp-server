@@ -208,21 +208,24 @@ Use any SFTP client:
 
 - **Host:** your server hostname/IP
 - **Port:** `22832` (from the compose example)
-- **Username:** your Immich email
-- **Password:** your Immich password
+- **Username / Password login:** use your Immich email as username and your Immich password
+- **Token login:** put your token in the username field and leave password empty  
+  (JWT access token and Immich API key are supported)
 
 Or use an FTP client if FTP is enabled:
 
 - **Host:** your server hostname/IP
 - **Port:** `22100` (from the compose example)
-- **Username:** your Immich email
-- **Password:** your Immich password
+- **Username / Password login:** use your Immich email as username and your Immich password
+- **Token login:** put your token in the username field and leave password empty  
+  (JWT access token and Immich API key are supported)
 
 Or use any WebDAV client if WebDAV is enabled (set `ENABLE_WEBDAV: "true"`):
 
 - **URL:** `http://your-server-hostname:19000` (from the compose example)
-- **Username:** your Immich email
-- **Password:** your Immich password
+- **Username / Password login:** use your Immich email as username and your Immich password
+- **Token login:** put your token in the username field and leave password empty  
+  (JWT access token and Immich API key are supported)
 
 WebDAV is natively supported by Windows (Map Network Drive → `http://…`), macOS Finder (Go → Connect to Server), and many mobile apps.
 

@@ -39,38 +39,54 @@ const DEFAULT_ASSET_BASE_NAME = 'asset';
 export class ImmichFileSystem implements VirtualFileSystem {
 
     private immichAccessToken: string = '';
+    private authMode: 'bearer' | 'api-key' = 'bearer';
+    private shouldLogoutSession = false;
     private albumsCache: ImmichAlbum[] = [];
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
     private currentUser: ImmichUser | null = null;
 
     async login(username: string, password: string): Promise<void> {
+        const trimmedUsername = username.trim();
+        const trimmedPassword = password.trim();
+
+        if (trimmedPassword === '' || !this.looksLikeEmail(trimmedUsername)) {
+            await this.loginWithToken(trimmedUsername);
+            return;
+        }
+
         const loginResp = await this.immichRequest({
             method: 'POST',
             endpoint: 'auth/login',
             data: JSON.stringify({
-                email: username,
-                password: password,
+                email: trimmedUsername,
+                password: trimmedPassword,
             }),
             logAction: 'Login'
         });
 
         // Store the access token
         this.immichAccessToken = loginResp.accessToken;
+        this.authMode = 'bearer';
+        this.shouldLogoutSession = true;
 
         // Try to get current user from login response first
-        this.currentUser = extractCurrentUser(loginResp.user, username);
+        this.currentUser = extractCurrentUser(loginResp.user, trimmedUsername);
 
         // Fallback to users/me endpoint
         if (!this.currentUser?.id || !this.currentUser?.username) {
-            await this.fetchCurrentUser(username);
+            await this.fetchCurrentUser(trimmedUsername);
         }
     }
     async logout(): Promise<void> {
-        await this.immichRequest({
-            method: 'POST',
-            endpoint: 'auth/logout',
-            logAction: 'Logout'
-        });
+        if (this.shouldLogoutSession) {
+            await this.immichRequest({
+                method: 'POST',
+                endpoint: 'auth/logout',
+                logAction: 'Logout'
+            });
+        }
+        this.immichAccessToken = '';
+        this.shouldLogoutSession = false;
         this.currentUser = null;
     }
 
@@ -656,6 +672,42 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return tempFile;
     }
 
+    private looksLikeEmail(value: string): boolean {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    }
+
+    private async loginWithToken(token: string): Promise<void> {
+        if (!token) {
+            throw new Error('Token login requires a non-empty token as username.');
+        }
+
+        this.immichAccessToken = token;
+        this.shouldLogoutSession = false;
+
+        this.authMode = 'bearer';
+        try {
+            const me = await this.immichRequest({
+                method: 'GET',
+                endpoint: 'users/me',
+                logAction: 'Current user (token)',
+                skipResponseLog: true,
+            });
+            this.currentUser = extractCurrentUser(me, 'token');
+            return;
+        } catch {
+            // Fall through to API key mode
+        }
+
+        this.authMode = 'api-key';
+        const me = await this.immichRequest({
+            method: 'GET',
+            endpoint: 'users/me',
+            logAction: 'Current user (api key)',
+            skipResponseLog: true,
+        });
+        this.currentUser = extractCurrentUser(me, 'token');
+    }
+
     // Remove trailing slashes from the Immich host URL
     private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
     private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
@@ -670,7 +722,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 headers: {
                     ...(isDownload ? {} : { 'Accept': 'application/json' }),
                     'User-Agent': 'ImmichNetworkStorage (Linux)',
-                    'Authorization': `Bearer ${this.immichAccessToken}`,
+                    ...(this.authMode === 'api-key'
+                        ? { 'x-api-key': this.immichAccessToken }
+                        : { 'Authorization': `Bearer ${this.immichAccessToken}` }),
                     ...(data instanceof FormData ? data.getHeaders?.() : { 'Content-Type': 'application/json' }),
                 },
                 data: data ?? undefined,

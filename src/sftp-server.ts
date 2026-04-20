@@ -34,7 +34,7 @@ const server = new Server({
   console.log('Client connected');
 
   con.on('authentication', async (ctx) => {
-    console.log(`Authenticating user: ${ctx.username} (method: ${ctx.method})`);
+    console.log(`Authenticating connection (method: ${ctx.method})`);
 
     if (ctx.method === 'password') {
 
@@ -48,11 +48,11 @@ const server = new Server({
       try {
         await con.fsBackend.login(ctx.username, ctx.password);
       } catch (err) {
-        console.error(`Authentication failed for user ${ctx.username}:`, err);
+        console.error('Authentication failed:', err);
         return ctx.reject();
       }
 
-      console.log(`User ${ctx.username} authenticated successfully`);
+      console.log('User authenticated successfully');
       ctx.accept();
     }
     else {
