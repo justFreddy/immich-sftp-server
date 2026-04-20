@@ -1,6 +1,6 @@
 # Immich Network Storage
 
-This repository is a **fork** of the original Immich Network Storage project with additional features and ongoing improvements.
+This repository is a **fork** of the original Immich SFTP SERVER project with additional features and ongoing improvements.
 
 It is an **SFTP/FTP/WebDAV bridge for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP, FTP, or WebDAV client.
 
