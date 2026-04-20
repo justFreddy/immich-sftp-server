@@ -34,14 +34,19 @@ import {
 } from './immich-album-virtual-file-service';
 
 const DEFAULT_ASSET_BASE_NAME = 'asset';
+const TAGS_FOLDER_NAME = 'tags';
+const PEOPLE_FOLDER_NAME = 'people';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
 
     private immichAccessToken: string = '';
     private albumsCache: ImmichAlbum[] = [];
+    private tagsCache: ImmichTag[] = [];
+    private peopleCache: ImmichPerson[] = [];
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
     private currentUser: ImmichUser | null = null;
+    private collectionVisibilityCache: { tagsEnabled: boolean; peopleEnabled: boolean } | null = null;
 
     async login(username: string, password: string): Promise<void> {
         const loginResp = await this.immichRequest({
@@ -72,9 +77,16 @@ export class ImmichFileSystem implements VirtualFileSystem {
             logAction: 'Logout'
         });
         this.currentUser = null;
+        this.collectionVisibilityCache = null;
+        this.tagsCache = [];
+        this.peopleCache = [];
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {
+        if (await this.isReadOnlyCollectionPath(filename)) {
+            throw new Error(`'${filename}' is read-only.`);
+        }
+
         // Metadata/link files are applied on CLOSE and don't need SETSTAT handling
         if (this.isVirtualAlbumFile(filename)) {
             return;
@@ -185,47 +197,120 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 //Get all albums from Immich API
                 this.albumsCache = await this.fetchAlbums();
+                const visibility = await this.getCollectionVisibility();
 
                 //Map albums to the expected format
-                return this.albumsCache.map((album) => ({
+                const rootEntries = this.albumsCache.map((album) => ({
                     name: album.albumName,
                     isDir: true,
                     size: 0,
                     mtime: getAlbumMtime(album),
                 }));
-            }
-            else {
-                // Get album and fetch assets
-                const album = await this.getAlbumFromCache(currentDir, false);
-                await this.fetchAssetsForAlbum(album);
 
-                // Map assets to the expected format
-                const files = (album.assets ?? []).map((asset) => ({
-                    name: this.getAssetDisplayName(asset, album),
+                const now = Math.floor(Date.now() / 1000);
+                if (visibility.tagsEnabled) {
+                    rootEntries.push({
+                        name: TAGS_FOLDER_NAME,
+                        isDir: true,
+                        size: 0,
+                        mtime: now,
+                    });
+                }
+                if (visibility.peopleEnabled) {
+                    rootEntries.push({
+                        name: PEOPLE_FOLDER_NAME,
+                        isDir: true,
+                        size: 0,
+                        mtime: now,
+                    });
+                }
+                return rootEntries;
+            }
+
+            if (await this.isTagsPath(currentDir)) {
+                const pathInfo = this.extractCollectionPathInfo(currentDir, TAGS_FOLDER_NAME);
+                if (pathInfo.fileName) {
+                    throw new Error(`Invalid tags path: ${currentDir}`);
+                }
+
+                if (!pathInfo.itemName) {
+                    this.tagsCache = await this.fetchTags();
+                    return this.tagsCache.map((tag) => ({
+                        name: tag.displayName,
+                        isDir: true,
+                        size: 0,
+                        mtime: this.getTimestampOrNow(tag.updatedAt),
+                    }));
+                }
+
+                const tag = await this.getTagFromCache(pathInfo.itemName, true);
+                const assets = await this.searchAssetsByMetadata({ tagIds: [tag.id] });
+                const nameByAssetId = this.getAssetDisplayNameByAssetId(assets);
+                return assets.map((asset) => ({
+                    name: nameByAssetId.get(asset.id) ?? asset.originalFileName,
                     isDir: false,
                     size: asset.fileSizeInByte,
                     mtime: this.getAssetMtime(asset),
                 }));
-
-                // Add virtual album metadata/link files
-                const metadataContent = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
-                const linkContent = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
-
-                files.push({
-                    name: ALBUM_METADATA_FILE_NAME,
-                    isDir: false,
-                    size: Buffer.byteLength(metadataContent, 'utf8'),
-                    mtime: getAlbumMtime(album),
-                });
-                files.push({
-                    name: ALBUM_BROWSER_LINK_FILE_NAME,
-                    isDir: false,
-                    size: Buffer.byteLength(linkContent, 'utf8'),
-                    mtime: getAlbumMtime(album),
-                });
-
-                return files;
             }
+
+            if (await this.isPeoplePath(currentDir)) {
+                const pathInfo = this.extractCollectionPathInfo(currentDir, PEOPLE_FOLDER_NAME);
+                if (pathInfo.fileName) {
+                    throw new Error(`Invalid people path: ${currentDir}`);
+                }
+
+                if (!pathInfo.itemName) {
+                    this.peopleCache = await this.fetchPeople();
+                    return this.peopleCache.map((person) => ({
+                        name: person.displayName,
+                        isDir: true,
+                        size: 0,
+                        mtime: this.getTimestampOrNow(person.updatedAt),
+                    }));
+                }
+
+                const person = await this.getPersonFromCache(pathInfo.itemName, true);
+                const assets = await this.searchAssetsByMetadata({ personIds: [person.id] });
+                const nameByAssetId = this.getAssetDisplayNameByAssetId(assets);
+                return assets.map((asset) => ({
+                    name: nameByAssetId.get(asset.id) ?? asset.originalFileName,
+                    isDir: false,
+                    size: asset.fileSizeInByte,
+                    mtime: this.getAssetMtime(asset),
+                }));
+            }
+
+            // Get album and fetch assets
+            const album = await this.getAlbumFromCache(currentDir, false);
+            await this.fetchAssetsForAlbum(album);
+
+            // Map assets to the expected format
+            const files = (album.assets ?? []).map((asset) => ({
+                name: this.getAssetDisplayName(asset, album),
+                isDir: false,
+                size: asset.fileSizeInByte,
+                mtime: this.getAssetMtime(asset),
+            }));
+
+            // Add virtual album metadata/link files
+            const metadataContent = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
+            const linkContent = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
+
+            files.push({
+                name: ALBUM_METADATA_FILE_NAME,
+                isDir: false,
+                size: Buffer.byteLength(metadataContent, 'utf8'),
+                mtime: getAlbumMtime(album),
+            });
+            files.push({
+                name: ALBUM_BROWSER_LINK_FILE_NAME,
+                isDir: false,
+                size: Buffer.byteLength(linkContent, 'utf8'),
+                mtime: getAlbumMtime(album),
+            });
+
+            return files;
         }
         catch (error) {
             console.error("Error fetching albums:", error);
@@ -243,6 +328,25 @@ export class ImmichFileSystem implements VirtualFileSystem {
             const album = await this.getAlbumFromCache(filename, false);
             await this.fetchAssetsForAlbum(album);
             return this.tmpFileFromString(buildAlbumBrowserLinkForAlbum(album, this.baseUrl));
+        }
+
+        const collectionAsset = await this.getCollectionAssetOrNull(filename, true);
+        if (collectionAsset) {
+            const endpoint = config.assetDownloadSource === 'preview'
+                ? `assets/${collectionAsset.id}/thumbnail`
+                : `assets/${collectionAsset.id}/original`;
+
+            const responseStream: Readable = await this.immichRequest({
+                method: 'GET',
+                endpoint,
+                logAction: 'Download asset',
+                respAsStream: true
+            });
+
+            const tmpFile = tmp.fileSync();
+            const writeStream = fs.createWriteStream(tmpFile.name);
+            await pipeline(responseStream, writeStream);
+            return tmpFile;
         }
 
         //todo refactor this: Stream not Buffer, Check and refresh cache
@@ -271,6 +375,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return tmpFile;
     }
     async writeFile(filename: string, tmpFile: tmp.FileResult): Promise<void> {
+        if (await this.isReadOnlyCollectionPath(filename)) {
+            tmpFile.removeCallback();
+            throw new Error(`'${filename}' is read-only.`);
+        }
+
         if (this.isAlbumMetadataFilePath(filename)) {
             const album = await this.getAlbumFromCache(filename, false);
             await this.fetchAssetsForAlbum(album);
@@ -296,6 +405,80 @@ export class ImmichFileSystem implements VirtualFileSystem {
         this.uploadQueue.push({ filename, tmpFile });
     }
     async stat(filename: string): Promise<{ isDir: boolean; size: number; mtime: number; } | null> {
+        if (filename === '/') {
+            return {
+                isDir: true,
+                size: 0,
+                mtime: Math.floor(Date.now() / 1000),
+            };
+        }
+
+        if (await this.isTagsPath(filename)) {
+            const pathInfo = this.extractCollectionPathInfo(filename, TAGS_FOLDER_NAME);
+            if (!pathInfo.itemName) {
+                return {
+                    isDir: true,
+                    size: 0,
+                    mtime: Math.floor(Date.now() / 1000),
+                };
+            }
+
+            if (!pathInfo.fileName) {
+                const tag = await this.getTagOrNullFromCache(pathInfo.itemName, true);
+                if (!tag) {
+                    return null;
+                }
+                return {
+                    isDir: true,
+                    size: 0,
+                    mtime: this.getTimestampOrNow(tag.updatedAt),
+                };
+            }
+
+            const asset = await this.getCollectionAssetOrNull(filename, true);
+            if (!asset) {
+                return null;
+            }
+            return {
+                isDir: false,
+                size: asset.fileSizeInByte,
+                mtime: this.getAssetMtime(asset),
+            };
+        }
+
+        if (await this.isPeoplePath(filename)) {
+            const pathInfo = this.extractCollectionPathInfo(filename, PEOPLE_FOLDER_NAME);
+            if (!pathInfo.itemName) {
+                return {
+                    isDir: true,
+                    size: 0,
+                    mtime: Math.floor(Date.now() / 1000),
+                };
+            }
+
+            if (!pathInfo.fileName) {
+                const person = await this.getPersonOrNullFromCache(pathInfo.itemName, true);
+                if (!person) {
+                    return null;
+                }
+                return {
+                    isDir: true,
+                    size: 0,
+                    mtime: this.getTimestampOrNow(person.updatedAt),
+                };
+            }
+
+            const asset = await this.getCollectionAssetOrNull(filename, true);
+            if (!asset) {
+                return null;
+            }
+            return {
+                isDir: false,
+                size: asset.fileSizeInByte,
+                mtime: this.getAssetMtime(asset),
+            };
+        }
+
         // Determine if the path is a directory (album) or a file (asset)
         const pathInfo = this.extractPathInfo(filename);
 
@@ -353,6 +536,39 @@ export class ImmichFileSystem implements VirtualFileSystem {
             throw new Error('Renaming virtual album files is not supported.');
         }
 
+        if (await this.isTagsPath(oldName) || await this.isTagsPath(newName)) {
+            throw new Error(`'${TAGS_FOLDER_NAME}' is read-only.`);
+        }
+
+        if (await this.isPeoplePath(oldName) || await this.isPeoplePath(newName)) {
+            const oldPathInfo = this.extractCollectionPathInfo(oldName, PEOPLE_FOLDER_NAME);
+            const newPathInfo = this.extractCollectionPathInfo(newName, PEOPLE_FOLDER_NAME);
+
+            const isPersonFolderRename = oldPathInfo.itemName && !oldPathInfo.fileName && newPathInfo.itemName && !newPathInfo.fileName;
+            if (!isPersonFolderRename) {
+                throw new Error(`'${PEOPLE_FOLDER_NAME}' is read-only except for renaming person folders.`);
+            }
+
+            if (!isValidFilename(newPathInfo.itemName)) {
+                throw new Error(`Invalid person folder name: '${newPathInfo.itemName}'.`);
+            }
+
+            const person = await this.getPersonFromCache(oldPathInfo.itemName, true);
+            const targetPerson = await this.getPersonOrNullFromCache(newPathInfo.itemName, false);
+            if (targetPerson && targetPerson.id !== person.id) {
+                throw new Error(`A person with name '${newPathInfo.itemName}' already exists.`);
+            }
+
+            await this.immichRequest({
+                method: 'PUT',
+                endpoint: `people/${person.id}`,
+                data: JSON.stringify({ name: newPathInfo.itemName }),
+                logAction: 'Rename person',
+            });
+            this.peopleCache = await this.fetchPeople();
+            return;
+        }
+
         // Check if the file exists in the upload queue
         const fileIndex = this.uploadQueue.findIndex(f => f.filename === oldName);
 
@@ -366,6 +582,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
         throw new Error("Rename not support for Immich backend. Expect for tmp files (files that have been upload with OPEN, WRITE, CLOSE, but not jet sent to Immich in SETSTAT).");
     }
     async remove(filename: string): Promise<void> {
+        if (await this.isReadOnlyCollectionPath(filename)) {
+            throw new Error(`'${filename}' is read-only.`);
+        }
 
         // Check if the path is a file, not a directory
         const pathInfo = this.extractPathInfo(filename);
@@ -403,6 +622,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     async mkdir(path: string): Promise<void> {
+        if (await this.isReadOnlyCollectionPath(path)) {
+            throw new Error(`'${path}' is read-only.`);
+        }
+
         // Only allow creation of folders at level 1 (e.g., "/MyAlbum")
         const cleanedPath = path.replace(/^\/+|\/+$/g, ""); // Remove leading and trailing slashes
         if (cleanedPath.includes("/")) {
@@ -520,22 +743,293 @@ export class ImmichFileSystem implements VirtualFileSystem {
         applyAlbumDetails(album, response);
 
         // Convert to ImmichAsset
-        album.assets = (response.assets ?? []).map((asset: any): ImmichAsset => {
+        album.assets = (response.assets ?? []).map((asset: any): ImmichAsset => this.mapAssetFromApi(asset));
+    }
 
-            if (!asset.exifInfo?.fileSizeInByte) {
-                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
+    private mapAssetFromApi(asset: any): ImmichAsset {
+        if (!asset.exifInfo?.fileSizeInByte) {
+            console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
+        }
+        return {
+            id: asset.id,
+            originalFileName: asset.originalFileName,
+            createdAt: asset.createdAt,
+            updatedAt: asset.updatedAt,
+            fileCreatedAt: asset.fileCreatedAt,
+            fileModifiedAt: asset.fileModifiedAt,
+            fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
+            isTrashed: asset.isTrashed,
+        };
+    }
+
+    private async getCollectionVisibility(): Promise<{ tagsEnabled: boolean; peopleEnabled: boolean }> {
+        if (this.collectionVisibilityCache) {
+            return this.collectionVisibilityCache;
+        }
+
+        let tagsEnabled = config.enableTagsFolderDefault;
+        let peopleEnabled = config.enablePeopleFolderDefault;
+
+        try {
+            const preferences = await this.immichRequest({
+                method: 'GET',
+                endpoint: 'users/me/preferences',
+                logAction: 'Current user preferences',
+                skipResponseLog: true,
+            });
+
+            if (typeof preferences?.tags?.enabled === 'boolean') {
+                tagsEnabled = preferences.tags.enabled;
             }
-            return {
-                id: asset.id,
-                originalFileName: asset.originalFileName,
-                createdAt: asset.createdAt,
-                updatedAt: asset.updatedAt,
-                fileCreatedAt: asset.fileCreatedAt,
-                fileModifiedAt: asset.fileModifiedAt,
-                fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
-                isTrashed: asset.isTrashed,
+            if (typeof preferences?.people?.enabled === 'boolean') {
+                peopleEnabled = preferences.people.enabled;
             }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.warn(`Could not fetch user preferences (${errorMessage}), using default collection settings.`);
+        }
+
+        this.collectionVisibilityCache = { tagsEnabled, peopleEnabled };
+        return this.collectionVisibilityCache;
+    }
+
+    private async isTagsPath(filePath: string): Promise<boolean> {
+        const visibility = await this.getCollectionVisibility();
+        return visibility.tagsEnabled && this.pathStartsWithFolder(filePath, TAGS_FOLDER_NAME);
+    }
+
+    private async isPeoplePath(filePath: string): Promise<boolean> {
+        const visibility = await this.getCollectionVisibility();
+        return visibility.peopleEnabled && this.pathStartsWithFolder(filePath, PEOPLE_FOLDER_NAME);
+    }
+
+    private async isReadOnlyCollectionPath(filePath: string): Promise<boolean> {
+        return await this.isTagsPath(filePath) || await this.isPeoplePath(filePath);
+    }
+
+    private pathStartsWithFolder(filePath: string, folder: string): boolean {
+        const parts = this.getPathParts(filePath);
+        return parts[0] === folder;
+    }
+
+    private getPathParts(filePath: string): string[] {
+        return filePath.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+    }
+
+    private extractCollectionPathInfo(filePath: string, rootFolderName: string): { itemName: string | null, fileName: string | null } {
+        const parts = this.getPathParts(filePath);
+        if (parts[0] !== rootFolderName) {
+            throw new Error(`Path '${filePath}' is not in '${rootFolderName}'.`);
+        }
+
+        if (parts.length === 1) {
+            return { itemName: null, fileName: null };
+        }
+        if (parts.length === 2) {
+            return { itemName: parts[1], fileName: null };
+        }
+        if (parts.length === 3) {
+            return { itemName: parts[1], fileName: parts[2] };
+        }
+        throw new Error(`Invalid path '${filePath}' in '${rootFolderName}' folder.`);
+    }
+
+    private normalizeFolderDisplayName(name: string, fallbackPrefix: string, id: string): string {
+        const trimmed = name.trim();
+        const fallbackName = `${fallbackPrefix}_${id.slice(0, 8)}`;
+        const candidate = trimmed === '' ? fallbackName : trimmed;
+        const sanitized = candidate.replace(/[\\/:*?"<>|]/g, '_');
+        return sanitized.trim() || fallbackName;
+    }
+
+    private async fetchTags(): Promise<ImmichTag[]> {
+        const response = await this.immichRequest({
+            method: 'GET',
+            endpoint: 'tags',
+            logAction: 'All tags',
+            skipResponseLog: true,
         });
+
+        if (!Array.isArray(response)) {
+            return [];
+        }
+
+        const seenNames = new Set<string>();
+        const tags: ImmichTag[] = [];
+        for (const tag of response) {
+            if (!tag?.id || typeof tag?.id !== 'string') {
+                continue;
+            }
+            const displayName = this.normalizeFolderDisplayName(String(tag.name ?? ''), 'tag', tag.id);
+            if (!isValidFilename(displayName)) {
+                continue;
+            }
+            const lowerDisplayName = displayName.toLowerCase();
+            if (seenNames.has(lowerDisplayName)) {
+                continue;
+            }
+            seenNames.add(lowerDisplayName);
+            tags.push({
+                id: tag.id,
+                name: String(tag.name ?? ''),
+                displayName,
+                updatedAt: typeof tag.updatedAt === 'string' ? tag.updatedAt : undefined,
+            });
+        }
+        return tags;
+    }
+
+    private async fetchPeople(): Promise<ImmichPerson[]> {
+        const people: ImmichPerson[] = [];
+        const seenNames = new Set<string>();
+        let page = 1;
+
+        while (true) {
+            const response = await this.immichRequest({
+                method: 'GET',
+                endpoint: `people?page=${page}&size=1000&withHidden=false`,
+                logAction: 'All people',
+                skipResponseLog: true,
+            });
+
+            const responsePeople = Array.isArray(response?.people) ? response.people : [];
+            for (const person of responsePeople) {
+                if (!person?.id || typeof person?.id !== 'string') {
+                    continue;
+                }
+                const displayName = this.normalizeFolderDisplayName(String(person.name ?? ''), 'person', person.id);
+                if (!isValidFilename(displayName)) {
+                    continue;
+                }
+                const lowerDisplayName = displayName.toLowerCase();
+                if (seenNames.has(lowerDisplayName)) {
+                    continue;
+                }
+                seenNames.add(lowerDisplayName);
+                people.push({
+                    id: person.id,
+                    name: String(person.name ?? ''),
+                    displayName,
+                    updatedAt: typeof person.updatedAt === 'string' ? person.updatedAt : undefined,
+                });
+            }
+
+            if (!response?.hasNextPage) {
+                break;
+            }
+            page += 1;
+        }
+
+        return people;
+    }
+
+    private async searchAssetsByMetadata(query: { tagIds?: string[]; personIds?: string[] }): Promise<ImmichAsset[]> {
+        const byAssetId = new Map<string, ImmichAsset>();
+        let page = 1;
+
+        while (true) {
+            const response = await this.immichRequest({
+                method: 'POST',
+                endpoint: 'search/metadata',
+                data: JSON.stringify({
+                    ...query,
+                    page,
+                    size: 1000,
+                    withDeleted: false,
+                    withExif: true,
+                }),
+                logAction: 'Search assets',
+                skipResponseLog: true,
+            });
+
+            const items = Array.isArray(response?.assets?.items) ? response.assets.items : [];
+            for (const item of items) {
+                const asset = this.mapAssetFromApi(item);
+                byAssetId.set(asset.id, asset);
+            }
+
+            const nextPageRaw = response?.assets?.nextPage;
+            const nextPage = typeof nextPageRaw === 'string' ? Number.parseInt(nextPageRaw, 10) : Number.NaN;
+            if (!Number.isInteger(nextPage) || nextPage <= page || items.length === 0) {
+                break;
+            }
+            page = nextPage;
+        }
+
+        return Array.from(byAssetId.values());
+    }
+
+    private async getTagOrNullFromCache(displayName: string, refreshCache: boolean): Promise<ImmichTag | null> {
+        if (this.tagsCache.length === 0 || refreshCache) {
+            this.tagsCache = await this.fetchTags();
+        }
+        return this.tagsCache.find((tag) => tag.displayName === displayName) ?? null;
+    }
+
+    private async getTagFromCache(displayName: string, refreshCache: boolean): Promise<ImmichTag> {
+        const tag = await this.getTagOrNullFromCache(displayName, refreshCache);
+        if (!tag) {
+            throw new Error(`Tag not found: ${displayName}`);
+        }
+        return tag;
+    }
+
+    private async getPersonOrNullFromCache(displayName: string, refreshCache: boolean): Promise<ImmichPerson | null> {
+        if (this.peopleCache.length === 0 || refreshCache) {
+            this.peopleCache = await this.fetchPeople();
+        }
+        return this.peopleCache.find((person) => person.displayName === displayName) ?? null;
+    }
+
+    private async getPersonFromCache(displayName: string, refreshCache: boolean): Promise<ImmichPerson> {
+        const person = await this.getPersonOrNullFromCache(displayName, refreshCache);
+        if (!person) {
+            throw new Error(`Person not found: ${displayName}`);
+        }
+        return person;
+    }
+
+    private async getCollectionAssetOrNull(filename: string, refreshCollectionAssets: boolean): Promise<ImmichAsset | null> {
+        if (await this.isTagsPath(filename)) {
+            const pathInfo = this.extractCollectionPathInfo(filename, TAGS_FOLDER_NAME);
+            if (!pathInfo.itemName || !pathInfo.fileName) {
+                return null;
+            }
+            const tag = await this.getTagOrNullFromCache(pathInfo.itemName, refreshCollectionAssets);
+            if (!tag) {
+                return null;
+            }
+            const assets = await this.searchAssetsByMetadata({ tagIds: [tag.id] });
+            return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets);
+        }
+
+        if (await this.isPeoplePath(filename)) {
+            const pathInfo = this.extractCollectionPathInfo(filename, PEOPLE_FOLDER_NAME);
+            if (!pathInfo.itemName || !pathInfo.fileName) {
+                return null;
+            }
+            const person = await this.getPersonOrNullFromCache(pathInfo.itemName, refreshCollectionAssets);
+            if (!person) {
+                return null;
+            }
+            const assets = await this.searchAssetsByMetadata({ personIds: [person.id] });
+            return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets);
+        }
+
+        return null;
+    }
+
+    private getAssetFromAssetsByDisplayName(displayName: string, assets: ImmichAsset[]): ImmichAsset | null {
+        const byDisplayName = this.getAssetDisplayNameMap(assets);
+        return byDisplayName.get(displayName) ?? null;
+    }
+
+    private getTimestampOrNow(value?: string): number {
+        const parsed = value ? Date.parse(value) : Number.NaN;
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            return Math.floor(Date.now() / 1000);
+        }
+        return Math.floor(parsed / 1000);
     }
     private extractPathInfo(filePath: string): { albumName: string; fileName: string | null } {
         // Entfernt führende und doppelte Slashes, z. B. aus "//Pflanzen/..." → "Pflanzen/..."
@@ -598,7 +1092,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return null;
         }
 
-        return this.getAssetDisplayNameMap(album).get(assetFileName) ?? null;
+        return this.getAssetDisplayNameMap(album.assets ?? []).get(assetFileName) ?? null;
     }
     private async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
@@ -733,14 +1227,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     private getAssetDisplayName(asset: ImmichAsset, album: ImmichAlbum): string {
-        return this.getAssetDisplayNameByAssetId(album).get(asset.id) ?? asset.originalFileName;
+        return this.getAssetDisplayNameByAssetId(album.assets ?? []).get(asset.id) ?? asset.originalFileName;
     }
 
-    private getAssetDisplayNameMap(album: ImmichAlbum): Map<string, ImmichAsset> {
+    private getAssetDisplayNameMap(assets: ImmichAsset[]): Map<string, ImmichAsset> {
         const byDisplayName = new Map<string, ImmichAsset>();
         const usedNames = new Set<string>([ALBUM_METADATA_FILE_NAME, ALBUM_BROWSER_LINK_FILE_NAME]);
 
-        for (const asset of album.assets ?? []) {
+        for (const asset of assets) {
             const preferredName = this.buildPreferredAssetName(asset);
             const uniqueName = this.ensureUniqueAssetName(preferredName, asset, usedNames);
             usedNames.add(uniqueName);
@@ -749,9 +1243,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return byDisplayName;
     }
 
-    private getAssetDisplayNameByAssetId(album: ImmichAlbum): Map<string, string> {
+    private getAssetDisplayNameByAssetId(assets: ImmichAsset[]): Map<string, string> {
         const byAssetId = new Map<string, string>();
-        for (const [displayName, asset] of this.getAssetDisplayNameMap(album).entries()) {
+        for (const [displayName, asset] of this.getAssetDisplayNameMap(assets).entries()) {
             byAssetId.set(asset.id, displayName);
         }
         return byAssetId;
@@ -816,4 +1310,18 @@ interface ImmichAsset {
     fileModifiedAt: string;
     fileSizeInByte: number;
     isTrashed: boolean;
+}
+
+interface ImmichTag {
+    id: string;
+    name: string;
+    displayName: string;
+    updatedAt?: string;
+}
+
+interface ImmichPerson {
+    id: string;
+    name: string;
+    displayName: string;
+    updatedAt?: string;
 }

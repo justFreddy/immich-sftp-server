@@ -52,6 +52,17 @@ Each album folder also contains:
 `album.yaml` is validated against `schemas/album.yaml.schema.json`.
 If a user edits fields they are not allowed to change, save is blocked and an error is returned to the SFTP client.
 
+### Virtual tags and people folders
+
+- Optional top-level folders:
+  - `/tags/<tag-name>/...` → all assets that have the tag
+  - `/people/<person-name>/...` → all assets recognized for the person
+- Visibility follows Immich user preferences (`tags.enabled` / `people.enabled` in `/users/me/preferences`).
+- Fallback defaults are configurable (see environment variables below).
+- `tags` and `people` are read-only collections:
+  - no upload/delete/mkdir
+  - only `/people/<person-name>` folder rename is allowed (renames the person in Immich)
+
 ### Uploads 
 
 Uploading files to SFTP is handled by the following rules:
@@ -188,6 +199,8 @@ services:
   - `date` → `YYYYMMDD_HHMMSSmmm` + original extension
   - `dateUuid`/`date_uuid` → `YYYYMMDD_HHMMSSmmm_<first8uuid>` + original extension
 - `ASSET_DOWNLOAD_SOURCE` (default: `original`) – `original` or `preview`
+- `ENABLE_TAGS_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for tags is unavailable
+- `ENABLE_PEOPLE_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for people is unavailable
 - `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path
 
 ### Optional YAML settings file (repository/container root)
@@ -198,6 +211,11 @@ If `immich-network-storage.yaml` exists in the working directory, it can define 
 asset:
   fileNamePattern: short_uuid
   downloadSource: preview
+virtualFolders:
+  tags:
+    enabledDefault: true
+  people:
+    enabledDefault: true
 ```
 
 Environment variables still take precedence over YAML values.
