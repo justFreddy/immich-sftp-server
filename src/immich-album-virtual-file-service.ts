@@ -90,6 +90,17 @@ export async function applyAlbumMetadataFileContent({
         throw new Error('Blocked save: only the album owner can edit album.yaml.');
     }
 
+    const newAlbumName = metadata.album.name.trim();
+    if (newAlbumName && newAlbumName !== album.albumName) {
+        await immichRequest({
+            method: 'PATCH',
+            endpoint: `albums/${album.id}`,
+            data: JSON.stringify({ albumName: newAlbumName }),
+            logAction: 'Rename album via album.yaml',
+        });
+        album.albumName = newAlbumName;
+    }
+
     const newDescription = mergeNoSyncTag(metadata.album.description, metadata.settings.hidden);
     if ((album.description ?? '') !== newDescription) {
         await immichRequest({

@@ -119,7 +119,6 @@ export function getChangedImmutableAlbumMetadataFields(current: AlbumMetadataDoc
     const changedImmutableFields: string[] = [];
     if (next.schemaVersion !== current.schemaVersion) changedImmutableFields.push('schemaVersion');
     if (next.album.id !== current.album.id) changedImmutableFields.push('album.id');
-    if (next.album.name !== current.album.name) changedImmutableFields.push('album.name');
     if (next.album.ownerUsername !== current.album.ownerUsername) changedImmutableFields.push('album.ownerUsername');
     if (next.album.ownerId !== current.album.ownerId) changedImmutableFields.push('album.ownerId');
     if (next.links.immichWeb !== current.links.immichWeb) changedImmutableFields.push('links.immichWeb');
