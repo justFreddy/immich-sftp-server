@@ -765,11 +765,44 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (data instanceof FormData) {
             return '[FormData]';
         }
+        if (typeof data === 'string') {
+            try {
+                const parsed = JSON.parse(data);
+                return this.redactSensitiveFields(parsed);
+            } catch {
+                // Keep non-JSON string as-is.
+            }
+        }
+        if (typeof data === 'object' && data !== null) {
+            return this.redactSensitiveFields(data);
+        }
         // Handle edge cases where the data might be large and contain binary-like strings.
         if (typeof data === 'string' && /[^\x00-\x7F]/.test(data)) {
             return '[Non-ASCII Text]'; // Mask non-ASCII content as non-readable text
         }
         return data; // Return as is if not an object
+    }
+
+    private redactSensitiveFields(data: unknown): unknown {
+        const sensitiveKeys = new Set(['password', 'token', 'accessToken', 'authorization', 'x-api-key', 'apiKey']);
+
+        if (Array.isArray(data)) {
+            return data.map(item => this.redactSensitiveFields(item));
+        }
+
+        if (typeof data !== 'object' || data === null) {
+            return data;
+        }
+
+        const redacted: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(data)) {
+            if (sensitiveKeys.has(key)) {
+                redacted[key] = '[REDACTED]';
+                continue;
+            }
+            redacted[key] = this.redactSensitiveFields(value);
+        }
+        return redacted;
     }
 
     private getAssetMtime(asset: ImmichAsset): number {
