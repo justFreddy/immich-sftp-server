@@ -548,21 +548,23 @@ export class ImmichFileSystem implements VirtualFileSystem {
             if (!isPersonFolderRename) {
                 throw new Error(`'${PEOPLE_FOLDER_NAME}' is read-only except for renaming person folders.`);
             }
+            const oldPersonName = oldPathInfo.itemName as string;
+            const newPersonName = newPathInfo.itemName as string;
 
-            if (!isValidFilename(newPathInfo.itemName)) {
-                throw new Error(`Invalid person folder name: '${newPathInfo.itemName}'.`);
+            if (!isValidFilename(newPersonName)) {
+                throw new Error(`Invalid person folder name: '${newPersonName}'.`);
             }
 
-            const person = await this.getPersonFromCache(oldPathInfo.itemName, true);
-            const targetPerson = await this.getPersonOrNullFromCache(newPathInfo.itemName, false);
+            const person = await this.getPersonFromCache(oldPersonName, true);
+            const targetPerson = await this.getPersonOrNullFromCache(newPersonName, false);
             if (targetPerson && targetPerson.id !== person.id) {
-                throw new Error(`A person with name '${newPathInfo.itemName}' already exists.`);
+                throw new Error(`A person with name '${newPersonName}' already exists.`);
             }
 
             await this.immichRequest({
                 method: 'PUT',
                 endpoint: `people/${person.id}`,
-                data: JSON.stringify({ name: newPathInfo.itemName }),
+                data: JSON.stringify({ name: newPersonName }),
                 logAction: 'Rename person',
             });
             this.peopleCache = await this.fetchPeople();
