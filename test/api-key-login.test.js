@@ -8,50 +8,16 @@ const path = require('node:path');
 const immichFileSystemModulePath = path.resolve(__dirname, '..', 'dist', 'immich-file-system.js');
 const execFileAsync = promisify(execFile);
 
-test('api key login via username supports bearer auth', async () => {
+test('api key login via username uses x-api-key header', async () => {
   const requests = [];
   const server = await startMockServer((req, res, body) => {
     requests.push({ method: req.method, url: req.url, headers: req.headers, body });
 
     if (req.method === 'GET' && req.url === '/api/users/me') {
-      if (req.headers.authorization === 'Bearer immich-api-key-bearer') {
-        return json(res, 200, { id: 'user-1', email: 'bearer@example.com', username: 'bearer-user' });
+      if (req.headers['x-api-key'] === 'immich-api-key-value') {
+        return json(res, 200, { id: 'user-1', email: 'api-key@example.com', username: 'api-key-user' });
       }
       return json(res, 401, { message: 'Unauthorized' });
-    }
-
-    if (req.method === 'GET' && (req.url === '/api/albums' || req.url === '/api/albums?shared=true')) {
-      return json(res, 200, []);
-    }
-
-    return json(res, 404, { message: 'Not found' });
-  });
-
-  try {
-    await runImmichSession(server.baseUrl, 'immich-api-key-bearer', '');
-  } finally {
-    await server.close();
-  }
-
-  assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/users/me' && r.headers.authorization === 'Bearer immich-api-key-bearer'));
-  assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/albums' && r.headers.authorization === 'Bearer immich-api-key-bearer'));
-});
-
-test('api key login via username supports x-api-key header fallback', async () => {
-  const requests = [];
-  let usersMeCalls = 0;
-  const server = await startMockServer((req, res, body) => {
-    requests.push({ method: req.method, url: req.url, headers: req.headers, body });
-
-    if (req.method === 'GET' && req.url === '/api/users/me') {
-      usersMeCalls += 1;
-      if (usersMeCalls === 1) {
-        return json(res, 401, { message: 'Unauthorized bearer' });
-      }
-      if (req.headers['x-api-key'] === 'immich-api-key-value') {
-        return json(res, 200, { id: 'user-2', email: 'api-key@example.com', username: 'api-key-user' });
-      }
-      return json(res, 401, { message: 'Unauthorized api key' });
     }
 
     if (req.method === 'GET' && (req.url === '/api/albums' || req.url === '/api/albums?shared=true')) {
@@ -67,9 +33,9 @@ test('api key login via username supports x-api-key header fallback', async () =
     await server.close();
   }
 
-  assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/users/me' && r.headers.authorization === 'Bearer immich-api-key-value'));
   assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/users/me' && r.headers['x-api-key'] === 'immich-api-key-value'));
   assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/albums' && r.headers['x-api-key'] === 'immich-api-key-value'));
+  assert.ok(requests.every((r) => !r.headers.authorization || r.headers.authorization === undefined));
 });
 
 test('email/password login keeps auth/login flow', async () => {

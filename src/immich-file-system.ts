@@ -683,22 +683,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         this.immichAccessToken = apiKey;
         this.shouldLogoutSession = false;
-
-        this.authMode = 'bearer';
-        try {
-            const me = await this.immichRequest({
-                method: 'GET',
-                endpoint: 'users/me',
-                logAction: 'Current user (api key bearer)',
-                skipResponseLog: true,
-            });
-            this.currentUser = extractCurrentUser(me, 'api-key');
-            return;
-        } catch {
-            // Fall through to x-api-key header mode
-        }
-
         this.authMode = 'api-key';
+
         const me = await this.immichRequest({
             method: 'GET',
             endpoint: 'users/me',
