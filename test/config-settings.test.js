@@ -31,6 +31,22 @@ process.stdout.write(JSON.stringify({
   return JSON.parse(output);
 }
 
+function readUserSettings(username, extraEnv = {}, cwd = path.resolve(__dirname, '..')) {
+  const script = `
+const { loadSettingsForUser } = require(${JSON.stringify(configModulePath)});
+process.stdout.write(JSON.stringify(loadSettingsForUser(${JSON.stringify(username)})));
+`;
+  const output = execFileSync(process.execPath, ['-e', script], {
+    cwd,
+    env: {
+      ...process.env,
+      IMMICH_HOST: 'http://immich.local',
+      ...extraEnv,
+    },
+  }).toString();
+  return JSON.parse(output);
+}
+
 test('asset settings can be read from root YAML file', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
@@ -98,6 +114,45 @@ test('virtual folder defaults can be read from root YAML file', (t) => {
     assetFileNamePattern: 'original',
     assetDownloadSource: 'original',
     enableTagsFolderDefault: false,
+    enablePeopleFolderDefault: true,
+  });
+});
+
+test('per-user YAML settings file overrides root settings for that user', (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `asset:
+  fileNamePattern: original
+  downloadSource: original
+virtualFolders:
+  tags:
+    enabledDefault: true
+  people:
+    enabledDefault: true
+`);
+  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.test.user@example.com.yaml'), `asset:
+  fileNamePattern: short_uuid
+  downloadSource: preview
+virtualFolders:
+  tags:
+    enabledDefault: false
+  people:
+    enabledDefault: false
+`);
+
+  const userSettings = readUserSettings('test.user@example.com', {}, tmpDir);
+  assert.deepEqual(userSettings, {
+    assetFileNamePattern: 'shortUuid',
+    assetDownloadSource: 'preview',
+    enableTagsFolderDefault: false,
+    enablePeopleFolderDefault: false,
+  });
+
+  const otherUserSettings = readUserSettings('other.user@example.com', {}, tmpDir);
+  assert.deepEqual(otherUserSettings, {
+    assetFileNamePattern: 'original',
+    assetDownloadSource: 'original',
+    enableTagsFolderDefault: true,
     enablePeopleFolderDefault: true,
   });
 });
