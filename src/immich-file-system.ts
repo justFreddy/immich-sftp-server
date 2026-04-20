@@ -126,7 +126,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             data.append('fileModifiedAt', isoWithOffset);
             data.append('fileCreatedAt', isoWithOffset);
             data.append('deviceAssetId', filename); // Use fileName as deviceAssetId
-            data.append('deviceId', 'immich-sftp-server');
+            data.append('deviceId', 'immich-network-storage');
             data.append('albumId', album.id);
 
             // Add stream from tmp file
@@ -669,7 +669,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 url: `${this.baseUrl}/api/${endpoint}`,
                 headers: {
                     ...(isDownload ? {} : { 'Accept': 'application/json' }),
-                    'User-Agent': 'ImmichSFTP (Linux)',
+                    'User-Agent': 'ImmichNetworkStorage (Linux)',
                     'Authorization': `Bearer ${this.immichAccessToken}`,
                     ...(data instanceof FormData ? data.getHeaders?.() : { 'Content-Type': 'application/json' }),
                 },

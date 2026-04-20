@@ -98,7 +98,7 @@ function getOptionalNestedString(source: Record<string, unknown>, path: string[]
 }
 
 function loadYamlSettingsFile(): Record<string, unknown> {
-  const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-sftp-server.yaml');
+  const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-network-storage.yaml');
   if (!fs.existsSync(settingsFilePath)) {
     return {};
   }

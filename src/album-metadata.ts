@@ -29,7 +29,7 @@ export interface AlbumMetadataDocument {
         sharedUsers: AlbumMetadataSharedUser[];
     };
     settings: {
-        hiddenFromSftp: boolean;
+        hidden: boolean;
     };
     links: {
         immichWeb: string;
@@ -76,7 +76,7 @@ export function buildAlbumMetadataDocument(album: AlbumMetadataAlbumInput, canEd
             })),
         },
         settings: {
-            hiddenFromSftp: hasNoSyncTag(album.description),
+            hidden: hasNoSyncTag(album.description),
         },
         links: {
             immichWeb: `${baseUrl}/albums/${album.id}`,
@@ -171,9 +171,9 @@ export function stripNoSyncTag(description: string): string {
         .trim();
 }
 
-export function mergeNoSyncTag(descriptionText: string, hiddenFromSftp: boolean): string {
+export function mergeNoSyncTag(descriptionText: string, hidden: boolean): string {
     const cleaned = stripNoSyncTag(descriptionText);
-    if (!hiddenFromSftp) {
+    if (!hidden) {
         return cleaned;
     }
 
@@ -221,7 +221,8 @@ function validateAlbumMetadataDocument(input: Record<string, unknown>): AlbumMet
             sharedUsers,
         },
         settings: {
-            hiddenFromSftp: Boolean(input.settings.hiddenFromSftp),
+            // Accept both 'hidden' (current) and 'hiddenFromSftp' (legacy) for backward compatibility.
+            hidden: Boolean(input.settings?.hidden ?? input.settings?.hiddenFromSftp),
         },
         links: {
             immichWeb: String(input.links.immichWeb ?? ''),

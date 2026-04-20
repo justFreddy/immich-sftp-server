@@ -1,7 +1,7 @@
 {
-  "name": "immich-sftp-server",
+  "name": "immich-network-storage",
   "version": "1.0.0",
-  "description": "Immich SFTP Server",
+  "description": "Immich Network Storage",
   "main": "server.js",
   "scripts": {
     "build": "tsc",

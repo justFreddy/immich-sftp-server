@@ -1,4 +1,4 @@
-# Immich SFTP/FTP/WebDAV Server
+# Immich Network Storage
 
 An **SFTP/FTP/WebDAV “bridge” for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP, FTP, or WebDAV client.
 
@@ -24,13 +24,13 @@ It also allows me to do most of the photo sorting on the phone, which is then re
 
 ---
 
-## How it works (Immich ↔ SFTP/FTP mapping) ⚙️
+## How it works ⚙️
 
 ### Albums → folders
 
 - Root (`/`) lists the albums the user has in Immich.
 - Creating a new folder in SFTP/FTP will create a new album in Immich.
-- Add `#nosync` somewhere into an album description in Immich to hide it from SFTP/FTP.
+- Add `#nosync` somewhere into an album description in Immich to hide it from all network storage protocols (SFTP, FTP, WebDAV).
 
 ### Assets → files
 
@@ -109,8 +109,8 @@ services:
     container_name: immich_postgres
      [...]
   
-+ immich-sftp:
-+   container_name: immich_sftp
++ immich-network-storage:
++   container_name: immich_network_storage
 +   image: ghcr.io/demian98/immich-sftp-server:latest 
  +   ports:
  +    - "22832:22" # SFTP
@@ -142,8 +142,8 @@ volumes:
 
 ```yaml
 services:
-  immich-sftp:
-    container_name: immich_sftp
+  immich-network-storage:
+    container_name: immich_network_storage
     image: ghcr.io/demian98/immich-sftp-server:latest 
     ports:
       - "22832:22" # SFTP
@@ -188,11 +188,11 @@ services:
   - `date` → `YYYYMMDD_HHMMSSmmm` + original extension
   - `dateUuid`/`date_uuid` → `YYYYMMDD_HHMMSSmmm_<first8uuid>` + original extension
 - `ASSET_DOWNLOAD_SOURCE` (default: `original`) – `original` or `preview`
-- `SETTINGS_FILE` (default: `./immich-sftp-server.yaml`) – optional YAML settings file path
+- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path
 
 ### Optional YAML settings file (repository/container root)
 
-If `immich-sftp-server.yaml` exists in the working directory, it can define the same asset settings:
+If `immich-network-storage.yaml` exists in the working directory, it can define the same asset settings:
 
 ```yaml
 asset:
