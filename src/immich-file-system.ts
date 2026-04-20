@@ -36,6 +36,8 @@ import {
 const DEFAULT_ASSET_BASE_NAME = 'asset';
 const TAGS_FOLDER_NAME = 'tags';
 const PEOPLE_FOLDER_NAME = 'people';
+const TAG_METADATA_FILE_NAME = 'tag.yaml';
+const PERSON_METADATA_FILE_NAME = 'person.yaml';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -245,13 +247,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 const tag = await this.getTagFromCache(pathInfo.itemName, true);
                 const assets = await this.searchAssetsByMetadata({ tagIds: [tag.id] });
-                const nameByAssetId = this.getAssetDisplayNameByAssetId(assets);
-                return assets.map((asset) => ({
+                const nameByAssetId = this.getAssetDisplayNameByAssetId(assets, new Set<string>([TAG_METADATA_FILE_NAME]));
+                const files = assets.map((asset) => ({
                     name: nameByAssetId.get(asset.id) ?? asset.originalFileName,
                     isDir: false,
                     size: asset.fileSizeInByte,
                     mtime: this.getAssetMtime(asset),
                 }));
+                const metadataContent = this.buildTagMetadataYaml(tag);
+                files.push({
+                    name: TAG_METADATA_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(metadataContent, 'utf8'),
+                    mtime: this.getTimestampOrNow(tag.updatedAt),
+                });
+                return files;
             }
 
             if (await this.isPeoplePath(currentDir)) {
@@ -272,13 +282,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 const person = await this.getPersonFromCache(pathInfo.itemName, true);
                 const assets = await this.searchAssetsByMetadata({ personIds: [person.id] });
-                const nameByAssetId = this.getAssetDisplayNameByAssetId(assets);
-                return assets.map((asset) => ({
+                const nameByAssetId = this.getAssetDisplayNameByAssetId(assets, new Set<string>([PERSON_METADATA_FILE_NAME]));
+                const files = assets.map((asset) => ({
                     name: nameByAssetId.get(asset.id) ?? asset.originalFileName,
                     isDir: false,
                     size: asset.fileSizeInByte,
                     mtime: this.getAssetMtime(asset),
                 }));
+                const metadataContent = this.buildPersonMetadataYaml(person);
+                files.push({
+                    name: PERSON_METADATA_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(metadataContent, 'utf8'),
+                    mtime: this.getTimestampOrNow(person.updatedAt),
+                });
+                return files;
             }
 
             // Get album and fetch assets
@@ -328,6 +346,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
             const album = await this.getAlbumFromCache(filename, false);
             await this.fetchAssetsForAlbum(album);
             return this.tmpFileFromString(buildAlbumBrowserLinkForAlbum(album, this.baseUrl));
+        }
+
+        const collectionMetadata = await this.getCollectionMetadataFileContentOrNull(filename, true);
+        if (collectionMetadata != null) {
+            return this.tmpFileFromString(collectionMetadata);
         }
 
         const collectionAsset = await this.getCollectionAssetOrNull(filename, true);
@@ -435,6 +458,19 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 };
             }
 
+            if (pathInfo.fileName === TAG_METADATA_FILE_NAME) {
+                const tag = await this.getTagOrNullFromCache(pathInfo.itemName, true);
+                if (!tag) {
+                    return null;
+                }
+                const metadataContent = this.buildTagMetadataYaml(tag);
+                return {
+                    isDir: false,
+                    size: Buffer.byteLength(metadataContent, 'utf8'),
+                    mtime: this.getTimestampOrNow(tag.updatedAt),
+                };
+            }
+
             const asset = await this.getCollectionAssetOrNull(filename, true);
             if (!asset) {
                 return null;
@@ -464,6 +500,19 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return {
                     isDir: true,
                     size: 0,
+                    mtime: this.getTimestampOrNow(person.updatedAt),
+                };
+            }
+
+            if (pathInfo.fileName === PERSON_METADATA_FILE_NAME) {
+                const person = await this.getPersonOrNullFromCache(pathInfo.itemName, true);
+                if (!person) {
+                    return null;
+                }
+                const metadataContent = this.buildPersonMetadataYaml(person);
+                return {
+                    isDir: false,
+                    size: Buffer.byteLength(metadataContent, 'utf8'),
                     mtime: this.getTimestampOrNow(person.updatedAt),
                 };
             }
@@ -537,37 +586,12 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         if (await this.isTagsPath(oldName) || await this.isTagsPath(newName)) {
-            throw new Error(`'${TAGS_FOLDER_NAME}' is read-only.`);
+            await this.renameCollectionFolder(oldName, newName, TAGS_FOLDER_NAME);
+            return;
         }
 
         if (await this.isPeoplePath(oldName) || await this.isPeoplePath(newName)) {
-            const oldPathInfo = this.extractCollectionPathInfo(oldName, PEOPLE_FOLDER_NAME);
-            const newPathInfo = this.extractCollectionPathInfo(newName, PEOPLE_FOLDER_NAME);
-
-            const isPersonFolderRename = oldPathInfo.itemName && !oldPathInfo.fileName && newPathInfo.itemName && !newPathInfo.fileName;
-            if (!isPersonFolderRename) {
-                throw new Error(`'${PEOPLE_FOLDER_NAME}' is read-only except for renaming person folders.`);
-            }
-            const oldPersonName = oldPathInfo.itemName as string;
-            const newPersonName = newPathInfo.itemName as string;
-
-            if (!isValidFilename(newPersonName)) {
-                throw new Error(`Invalid person folder name: '${newPersonName}'.`);
-            }
-
-            const person = await this.getPersonFromCache(oldPersonName, true);
-            const targetPerson = await this.getPersonOrNullFromCache(newPersonName, false);
-            if (targetPerson && targetPerson.id !== person.id) {
-                throw new Error(`A person with name '${newPersonName}' already exists.`);
-            }
-
-            await this.immichRequest({
-                method: 'PUT',
-                endpoint: `people/${person.id}`,
-                data: JSON.stringify({ name: newPersonName }),
-                logAction: 'Rename person',
-            });
-            this.peopleCache = await this.fetchPeople();
+            await this.renameCollectionFolder(oldName, newName, PEOPLE_FOLDER_NAME);
             return;
         }
 
@@ -997,12 +1021,15 @@ export class ImmichFileSystem implements VirtualFileSystem {
             if (!pathInfo.itemName || !pathInfo.fileName) {
                 return null;
             }
+            if (pathInfo.fileName === TAG_METADATA_FILE_NAME) {
+                return null;
+            }
             const tag = await this.getTagOrNullFromCache(pathInfo.itemName, refreshCollectionAssets);
             if (!tag) {
                 return null;
             }
             const assets = await this.searchAssetsByMetadata({ tagIds: [tag.id] });
-            return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets);
+            return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets, new Set<string>([TAG_METADATA_FILE_NAME]));
         }
 
         if (await this.isPeoplePath(filename)) {
@@ -1010,19 +1037,98 @@ export class ImmichFileSystem implements VirtualFileSystem {
             if (!pathInfo.itemName || !pathInfo.fileName) {
                 return null;
             }
+            if (pathInfo.fileName === PERSON_METADATA_FILE_NAME) {
+                return null;
+            }
             const person = await this.getPersonOrNullFromCache(pathInfo.itemName, refreshCollectionAssets);
             if (!person) {
                 return null;
             }
             const assets = await this.searchAssetsByMetadata({ personIds: [person.id] });
-            return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets);
+            return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets, new Set<string>([PERSON_METADATA_FILE_NAME]));
         }
 
         return null;
     }
 
-    private getAssetFromAssetsByDisplayName(displayName: string, assets: ImmichAsset[]): ImmichAsset | null {
-        const byDisplayName = this.getAssetDisplayNameMap(assets);
+    private async getCollectionMetadataFileContentOrNull(filename: string, refreshCache: boolean): Promise<string | null> {
+        if (await this.isTagsPath(filename)) {
+            const pathInfo = this.extractCollectionPathInfo(filename, TAGS_FOLDER_NAME);
+            if (!pathInfo.itemName || pathInfo.fileName !== TAG_METADATA_FILE_NAME) {
+                return null;
+            }
+            const tag = await this.getTagOrNullFromCache(pathInfo.itemName, refreshCache);
+            return tag ? this.buildTagMetadataYaml(tag) : null;
+        }
+
+        if (await this.isPeoplePath(filename)) {
+            const pathInfo = this.extractCollectionPathInfo(filename, PEOPLE_FOLDER_NAME);
+            if (!pathInfo.itemName || pathInfo.fileName !== PERSON_METADATA_FILE_NAME) {
+                return null;
+            }
+            const person = await this.getPersonOrNullFromCache(pathInfo.itemName, refreshCache);
+            return person ? this.buildPersonMetadataYaml(person) : null;
+        }
+
+        return null;
+    }
+
+    private buildTagMetadataYaml(tag: ImmichTag): string {
+        return `id: ${JSON.stringify(tag.id)}\nname: ${JSON.stringify(tag.name)}\ndisplayName: ${JSON.stringify(tag.displayName)}\n`;
+    }
+
+    private buildPersonMetadataYaml(person: ImmichPerson): string {
+        return `id: ${JSON.stringify(person.id)}\nname: ${JSON.stringify(person.name)}\ndisplayName: ${JSON.stringify(person.displayName)}\n`;
+    }
+
+    private async renameCollectionFolder(oldName: string, newName: string, rootFolderName: typeof TAGS_FOLDER_NAME | typeof PEOPLE_FOLDER_NAME): Promise<void> {
+        const oldPathInfo = this.extractCollectionPathInfo(oldName, rootFolderName);
+        const newPathInfo = this.extractCollectionPathInfo(newName, rootFolderName);
+        const isFolderRename = oldPathInfo.itemName && !oldPathInfo.fileName && newPathInfo.itemName && !newPathInfo.fileName;
+        if (!isFolderRename) {
+            throw new Error(`'${rootFolderName}' is read-only except for renaming ${rootFolderName} folders.`);
+        }
+
+        const oldDisplayName = oldPathInfo.itemName as string;
+        const newDisplayName = newPathInfo.itemName as string;
+        if (!isValidFilename(newDisplayName)) {
+            throw new Error(`Invalid folder name: '${newDisplayName}'.`);
+        }
+
+        if (rootFolderName === TAGS_FOLDER_NAME) {
+            const tag = await this.getTagFromCache(oldDisplayName, true);
+            const targetTag = await this.getTagOrNullFromCache(newDisplayName, false);
+            if (targetTag && targetTag.id !== tag.id) {
+                throw new Error(`A tag with name '${newDisplayName}' already exists.`);
+            }
+
+            await this.immichRequest({
+                method: 'PUT',
+                endpoint: `tags/${tag.id}`,
+                data: JSON.stringify({ name: newDisplayName }),
+                logAction: 'Rename tag',
+            });
+            this.tagsCache = await this.fetchTags();
+            return;
+        }
+
+        const person = await this.getPersonFromCache(oldDisplayName, true);
+        const targetPerson = await this.getPersonOrNullFromCache(newDisplayName, false);
+        if (targetPerson && targetPerson.id !== person.id) {
+            throw new Error(`A person with name '${newDisplayName}' already exists.`);
+        }
+
+        await this.immichRequest({
+            method: 'PUT',
+            endpoint: `people/${person.id}`,
+            data: JSON.stringify({ name: newDisplayName }),
+            logAction: 'Rename person',
+        });
+        this.peopleCache = await this.fetchPeople();
+    }
+
+    private getAssetFromAssetsByDisplayName(displayName: string, assets: ImmichAsset[], reservedNames: Set<string>): ImmichAsset | null {
+        const byDisplayName = this.getAssetDisplayNameMap(assets, reservedNames);
         return byDisplayName.get(displayName) ?? null;
     }
 
@@ -1094,7 +1200,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return null;
         }
 
-        return this.getAssetDisplayNameMap(album.assets ?? []).get(assetFileName) ?? null;
+        return this.getAssetDisplayNameMap(album.assets ?? [], new Set<string>([ALBUM_METADATA_FILE_NAME, ALBUM_BROWSER_LINK_FILE_NAME])).get(assetFileName) ?? null;
     }
     private async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
@@ -1229,12 +1335,12 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     private getAssetDisplayName(asset: ImmichAsset, album: ImmichAlbum): string {
-        return this.getAssetDisplayNameByAssetId(album.assets ?? []).get(asset.id) ?? asset.originalFileName;
+        return this.getAssetDisplayNameByAssetId(album.assets ?? [], new Set<string>([ALBUM_METADATA_FILE_NAME, ALBUM_BROWSER_LINK_FILE_NAME])).get(asset.id) ?? asset.originalFileName;
     }
 
-    private getAssetDisplayNameMap(assets: ImmichAsset[]): Map<string, ImmichAsset> {
+    private getAssetDisplayNameMap(assets: ImmichAsset[], reservedNames: Set<string>): Map<string, ImmichAsset> {
         const byDisplayName = new Map<string, ImmichAsset>();
-        const usedNames = new Set<string>([ALBUM_METADATA_FILE_NAME, ALBUM_BROWSER_LINK_FILE_NAME]);
+        const usedNames = new Set<string>(reservedNames);
 
         for (const asset of assets) {
             const preferredName = this.buildPreferredAssetName(asset);
@@ -1245,9 +1351,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return byDisplayName;
     }
 
-    private getAssetDisplayNameByAssetId(assets: ImmichAsset[]): Map<string, string> {
+    private getAssetDisplayNameByAssetId(assets: ImmichAsset[], reservedNames: Set<string>): Map<string, string> {
         const byAssetId = new Map<string, string>();
-        for (const [displayName, asset] of this.getAssetDisplayNameMap(assets).entries()) {
+        for (const [displayName, asset] of this.getAssetDisplayNameMap(assets, reservedNames).entries()) {
             byAssetId.set(asset.id, displayName);
         }
         return byAssetId;

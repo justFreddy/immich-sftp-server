@@ -57,11 +57,14 @@ If a user edits fields they are not allowed to change, save is blocked and an er
 - Optional top-level folders:
   - `/tags/<tag-name>/...` → all assets that have the tag
   - `/people/<person-name>/...` → all assets recognized for the person
+- Each tag/person folder contains a read-only metadata file with the Immich ID:
+  - `/tags/<tag-name>/tag.yaml`
+  - `/people/<person-name>/person.yaml`
 - Visibility follows Immich user preferences (`tags.enabled` / `people.enabled` in `/users/me/preferences`).
 - Fallback defaults are configurable (see environment variables below).
 - `tags` and `people` are read-only collections:
   - no upload/delete/mkdir
-  - only `/people/<person-name>` folder rename is allowed (renames the person in Immich)
+  - folder rename is allowed for `/tags/<tag-name>` and `/people/<person-name>` (renames tag/person in Immich)
 
 ### Uploads 
 
