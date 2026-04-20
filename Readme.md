@@ -1,124 +1,77 @@
 # Immich Network Storage
 
-This repository is a **fork** of the original Immich SFTP SERVER project with additional features and ongoing improvements.
+Fork of the original Immich SFTP Server project with additional features and ongoing improvements.
 
-It is an **SFTP/FTP/WebDAV bridge for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP, FTP, or WebDAV client.
+**SFTP/FTP/WebDAV bridge for Immich**: browse your Immich albums like folders and upload/download photos & videos using a standard client.
 
-## Ideas to use this 💡
+## What you can do
 
-- Two-way synchronize your Immich library with your phone (recommended app: FolderSync)
-- Import your existing folder-based library as Immich albums
-- Synchronize or connect Immich with any file-based third-party system
-- Maybe for backups? (Important and recommended: Do proper backups of the whole Immich instance — see https://docs.immich.app/administration/backup-and-restore/)
+- Browse albums as folders (`/albums/<album>/...`)
+- Upload/download assets via SFTP, FTP, or WebDAV
+- Create/rename albums by creating/renaming folders
+- Optional virtual folders for tags and people (`/tags/`, `/people/`)
 
+## How it works (quick overview)
 
-## Important technical facts 
+Root (`/`) exposes:
 
-- All actions in this project are **100% based on the official Immich API**. No access to or messing around with Immich internals.
-- **No data or metadata is stored** in this container. So it’s not relevant for your backups, and you can stop using it at any point without data loss.
+- `/albums/` — albums you can access
+- `/tags/` — assets by tag (optional)
+- `/people/` — assets by recognized person (optional)
 
----
+### Album folders
 
-## How it works ⚙️
+- Create `/albums/MyAlbum` → creates an album in Immich
+- Rename `/albums/Old` → `/albums/New` → renames the album in Immich
+- Add `#nosync` to an album description in Immich to hide it from all network-storage protocols
 
-### Root structure
+### Files = assets
 
-The root (`/`) always shows three virtual top-level folders:
+Asset listings are built from Immich metadata:
 
-| Folder | Contents |
-|--------|----------|
-| `/albums/` | All Immich albums the user can access |
-| `/tags/` | One subfolder per Immich tag (enabled by default, can be toggled) |
-| `/people/` | One subfolder per recognized person (enabled by default, can be toggled) |
+- filename: configurable (original/UUID/date-based)
+- mtime: from Immich asset timestamps
+- size: from Immich metadata
 
-### Albums → `/albums/`
+Each album folder also contains:
 
-- `/albums/` lists all albums the user has in Immich.
-- Creating a new folder inside `/albums/` (e.g. `/albums/MyAlbum`) creates a new album in Immich.
-- Renaming an album folder (e.g. `/albums/OldName` → `/albums/NewName`) renames the album in Immich.
-- Add `#nosync` somewhere into an album description in Immich to hide it from all network storage protocols (SFTP, FTP, WebDAV).
+- `album.yaml` — album settings + metadata (validated by `schemas/album.yaml.schema.json`)
+- `immich.html` — redirect file to open the album in a browser
 
-### Assets → files
+### Upload / delete behavior
 
-Inside each album folder under `/albums/<name>/`, files represent assets. Every asset you have added to an album will be shown inside its folder.
+Uploads are only allowed into `/albums/<name>/`:
 
-The file list you see is completely built from the metadata stored in Immich:
+- new file → new asset + added to that album
+- already exists in Immich → deduplicated + added to that album
+- previously deleted (in trash) → restored + added to that album
 
-- **Filename:** configurable (original name, UUID-based, or date-based)
-- **Modified time:** from Immich server asset timestamps
-- **Size:** file size of the asset
+Deletes:
 
-### Album metadata files
+- delete a file
+  - only in this album → moved to Immich trash
+  - also in other albums → removed from this album only
+- delete an album folder → deletes the album in Immich (note: many clients delete contained files too)
 
-Each album folder (`/albums/<name>/`) also contains:
+Downloads:
 
-- `album.yaml`: album settings + metadata (id, owner, shared users/roles, links, etc.)
-- `immich.html`: HTML redirect file to open the album in Immich in a browser
+- `original` — original upload
+- `preview` — generated preview
 
-`album.yaml` is validated against `schemas/album.yaml.schema.json`.
-If a user edits fields they are not allowed to change, save is blocked and an error is returned to the SFTP client.
+## Deployment (Docker Compose)
 
-### Virtual tags and people folders
-
-- Optional top-level folders:
-  - `/tags/<tag-name>/...` → all assets that have the tag
-  - `/people/<person-name>/...` → all assets recognized for the person
-- Each tag/person folder contains a read-only metadata file with the Immich ID:
-  - `/tags/<tag-name>/tag.yaml`
-  - `/people/<person-name>/person.yaml`
-- Visibility follows Immich user preferences (`tags.enabled` / `people.enabled` in `/users/me/preferences`).
-- Fallback defaults are configurable (see environment variables below).
-- `tags` and `people` are read-only collections:
-  - no upload/delete/mkdir
-  - folder rename is allowed for `/tags/<tag-name>` and `/people/<person-name>` (renames tag/person in Immich)
-
-### Uploads 
-
-Uploading files to SFTP is handled by the following rules:
-
-- Files can only be uploaded into album folders under `/albums/<name>/`, not into the root folder or the `/albums/` listing itself.
-- Upload a **new file**
-  - → a **new asset** is created in Immich and **added to that album**
-- Upload a file that **already exists** in Immich
-  -  → it is **deduplicated** (no duplicate created) and **added to that album**
-- Upload a file that was **previously deleted** and is still in the trash
-  -  → the asset is **restored from trash** and **added to that album**
-
-### Deleting 
-
-Delete items from your SFTP/FTP client:
-
-- **Delete a file**:
-  - if the asset is **only in this album** → it is moved to the **Immich trash**
-  - if the asset is also in **other albums** → it is **removed from this album only**
-- **Delete an album folder** (`/albums/<name>`) → the **album is deleted** in Immich  
-  > ⚠️ Important: Your SFTP client usually deletes all files inside a folder as well, so assets are also removed according to the rules above. If you could prevent the client from doing so, only the album would be removed, but the assets would not go to the trash.
-
-### Downloads 
-
-Any file can be downloaded from SFTP:
-
-- `original` mode: original file as uploaded to Immich
-- `preview` mode: generated smaller preview image from Immich
-
----
-
-## Deployment (Docker Compose) 🐳
-
-You can run all protocols in parallel. SFTP, FTP, and WebDAV can be enabled/disabled independently with environment variables.
-
-You can run this service standalone, and it is also possible to add the same service block into an existing Immich Docker Compose stack.
+You can run SFTP, FTP, and WebDAV in parallel and enable/disable each via env vars.
 
 ```yaml
 services:
   immich-network-storage:
     container_name: immich_network_storage
-    image: ghcr.io/demian98/immich-sftp-server:latest 
+    image: ghcr.io/demian98/immich-sftp-server:latest
     ports:
       - "22832:22" # SFTP
       - "22100:21" # FTP
       - "19000:1900" # WebDAV
-      - "30000-30010:30000-30010" # FTP passive data ports (optional, if passive mode is enabled)
+      - "30000-30010:30000-30010" # FTP passive ports (optional)
     environment:
       IMMICH_HOST: https://<your-immich-server-fqdn>:<immich-port>
       TZ: <your TZ>
@@ -139,34 +92,28 @@ services:
     restart: unless-stopped
 ```
 
-To disable persistent settings storage, remove the `volumes` entry and either remove `SETTINGS_FILE` or keep it on the default path (`./immich-network-storage.yaml` inside the container).
-
-### Environment variables
+### Key environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `IMMICH_HOST` | *(required)* | Base URL of your Immich server (for example `http://immich-server:2283`). |
-| `TZ` | `UTC` | Timezone used for metadata timestamps (for example `Europe/Berlin`). |
-| `HOST_KEY_DIR` | `/data/ssh-host-key` in Docker, `./data/ssh-host-key` outside Docker | Directory for persisted SFTP host keys. |
-| `LISTEN_HOST` | `0.0.0.0` | Bind address for all enabled servers. |
-| `ENABLE_SFTP` | `true` | Enable or disable the SFTP server. |
-| `SFTP_PORT` | `22` | Internal SFTP listen port. |
-| `ENABLE_FTP` | `false` | Enable or disable the FTP server. |
-| `FTP_PORT` | `21` | Internal FTP listen port. |
-| `FTP_PASSIVE_HOST` | *(unset)* | Hostname/public IP returned to FTP clients in passive mode. |
-| `FTP_PASSIVE_PORT_MIN` | *(unset)* | Passive FTP port range start (must be set together with `FTP_PASSIVE_PORT_MAX`). |
-| `FTP_PASSIVE_PORT_MAX` | *(unset)* | Passive FTP port range end (must be set together with `FTP_PASSIVE_PORT_MIN`). |
-| `ENABLE_WEBDAV` | `false` | Enable or disable the WebDAV server. |
-| `WEBDAV_PORT` | `1900` | Internal WebDAV listen port. |
-| `ASSET_FILENAME_PATTERN` | `original` | Asset file naming mode: `original`, `assetUuid`/`asset_uuid`/`uuid`, `shortUuid`/`short_uuid`, `date`, `dateUuid`/`date_uuid`. |
-| `ASSET_DOWNLOAD_SOURCE` | `original` | Download source mode: `original` or `preview` (`thumbnail` is accepted as alias for `preview`). |
-| `ENABLE_TAGS_FOLDER_DEFAULT` | `true` | Fallback default if Immich user preference for tags is unavailable. |
-| `ENABLE_PEOPLE_FOLDER_DEFAULT` | `true` | Fallback default if Immich user preference for people is unavailable. |
-| `SETTINGS_FILE` | `./immich-network-storage.yaml` | Optional YAML settings file path (supports `{userId}` placeholder). |
+| `IMMICH_HOST` | *(required)* | Base URL of your Immich server (e.g. `http://immich-server:2283`). |
+| `TZ` | `UTC` | Timezone for timestamps. |
+| `HOST_KEY_DIR` | `/data/ssh-host-key` (Docker) | Persisted SFTP host keys directory. |
+| `LISTEN_HOST` | `0.0.0.0` | Bind address. |
+| `ENABLE_SFTP` | `true` | Enable SFTP. |
+| `ENABLE_FTP` | `false` | Enable FTP. |
+| `ENABLE_WEBDAV` | `false` | Enable WebDAV. |
+| `FTP_PASSIVE_HOST` | *(unset)* | Host/IP returned to FTP clients in passive mode. |
+| `FTP_PASSIVE_PORT_MIN/MAX` | *(unset)* | Passive FTP port range. |
+| `ASSET_FILENAME_PATTERN` | `original` | `original`, `uuid`, `short_uuid`, `date`, `date_uuid`, ... |
+| `ASSET_DOWNLOAD_SOURCE` | `original` | `original` or `preview` (`thumbnail` alias accepted). |
+| `ENABLE_TAGS_FOLDER_DEFAULT` | `true` | Fallback if user preference can’t be read. |
+| `ENABLE_PEOPLE_FOLDER_DEFAULT` | `true` | Fallback if user preference can’t be read. |
+| `SETTINGS_FILE` | `./immich-network-storage.yaml` | Optional YAML settings (supports `{userId}`). |
 
-### Optional YAML settings file (repository/container root)
+### Optional YAML settings
 
-If `immich-network-storage.yaml` exists in the working directory, it can define the same asset settings:
+If `immich-network-storage.yaml` exists in the working directory:
 
 ```yaml
 asset:
@@ -179,54 +126,33 @@ virtualFolders:
     enabledDefault: true
 ```
 
-Environment variables still take precedence over YAML values.
+Env vars still take precedence. Per-user settings are supported via the Immich user ID (UUID) from `users/me`.
 
-Per-user settings are supported:
+## Connect / test
 
-- The per-user identifier is the Immich **user ID (UUID)** from the `users/me` API endpoint — stable even if the user renames their account.
-- If `SETTINGS_FILE` is `./immich-network-storage.yaml`, the server first checks `./immich-network-storage.<userId>.yaml` (e.g. `immich-network-storage.550e8400-e29b-41d4-a716-446655440000.yaml`) and then falls back to `./immich-network-storage.yaml`.
-- You can also set an explicit per-user template like `SETTINGS_FILE=/config/immich-network-storage.{userId}.yaml`.
-- To keep per-user settings persistent in Docker, mount a volume for the settings directory (for example `./immich-network-storage-config:/config`).
+SFTP (example above):
 
-### Connect / Test it ✅
+- Host: your server hostname/IP
+- Port: `22832`
+- Login:
+  - email/password (Immich credentials), or
+  - API key: user `apikey`, password = your Immich API key
 
-Use any SFTP client:
+FTP:
 
-- **Host:** your server hostname/IP
-- **Port:** `22832` (from the compose example)
-- **Username / Password login:** use your Immich email as username and your Immich password
-- **API key login:** use `apikey` as username and put your Immich API key in the password field if FTP is enabled:
+- Host: your server hostname/IP
+- Port: `22100`
+- Login: same as SFTP
 
-- **Host:** your server hostname/IP
-- **Port:** `22100` (from the compose example)
-- **Username / Password login:** use your Immich email as username and your Immich password
-- **API key login:** use `apikey` as username and put your Immich API key in the password field
+WebDAV:
 
-Or use any WebDAV client if WebDAV is enabled (set `ENABLE_WEBDAV: "true"`):
+- URL: `http://your-server-hostname:19000`
+- Login: same as SFTP
 
-- **URL:** `http://your-server-hostname:19000` (from the compose example)
-- **Username / Password login:** use your Immich email as username and your Immich password
-- **API key login:** use `apikey` as username and put your Immich API key in the password field
+## Known limitations
 
-WebDAV is natively supported by Windows (Map Network Drive → `http://…`), macOS Finder (Go → Connect to Server), and many mobile apps.
-
----
-
-## Supported clients 
-
-- FolderSync for Android (https://foldersync.io/)
-- WinSCP (https://winscp.net/)
-
-> Most likely most clients will just work — I don’t expect issues. But the two above are tested and working ✅
-
----
-
-## Known limitations 🧩
-
-- **Renaming files is not possible.** The `originalFileName` in Immich metadata can’t be changed. Because of that, it’s impossible to rename a file via SFTP.
-- **Albums are exposed under `/albums/`** — SFTP clients configured for the old root-level album layout need to update their paths to `/albums/<name>/`.
-- **Albums are not available** on SFTP when:
-  - they contain characters that are invalid for a filename
-  - the same album name is used multiple times
-- If an album contains multiple assets with the **same original filename**, SFTP clients may not handle it well. Technically this is possible in Immich — try to prevent it.
-- You can’t create subfolders inside an album, because nested albums are not possible in Immich.
+- Renaming files is not possible (Immich `originalFileName` can’t be changed).
+- Albums are exposed under `/albums/` (older clients using the previous root layout must update).
+- If an album contains multiple assets with the same original filename, some clients may not handle it well.
+- You can’t create subfolders inside an album (nested albums aren’t possible in Immich).
+- Album names with invalid filesystem characters are **sanitized** (characters may be replaced with `_`) rather than being hidden.
