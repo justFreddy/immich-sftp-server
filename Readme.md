@@ -75,7 +75,6 @@ services:
     environment:
       IMMICH_HOST: https://<your-immich-server-fqdn>:<immich-port>
       TZ: <your TZ>
-      HOST_KEY_DIR: "/data/ssh-host-key"
       ENABLE_SFTP: "true"
       ENABLE_FTP: "false"
       ENABLE_WEBDAV: "false"
@@ -98,7 +97,6 @@ services:
 |---|---|---|
 | `IMMICH_HOST` | *(required)* | Base URL of your Immich server (e.g. `http://immich-server:2283`). |
 | `TZ` | `UTC` | Timezone for timestamps. |
-| `HOST_KEY_DIR` | `/data/ssh-host-key` (Docker) | Persisted SFTP host keys directory. |
 | `LISTEN_HOST` | `0.0.0.0` | Bind address. |
 | `ENABLE_SFTP` | `true` | Enable SFTP. |
 | `ENABLE_FTP` | `false` | Enable FTP. |

@@ -9,10 +9,6 @@ async function startServers(): Promise<void> {
   ]);
   const servers: TransferProtocolServer[] = [];
 
-  if (config.enableSmb) {
-    throw new Error('SMB is not implemented yet. Set ENABLE_SMB to false.');
-  }
-
   if (config.enableSftp) {
     servers.push(new SftpProtocolServer());
   }
