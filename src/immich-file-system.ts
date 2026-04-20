@@ -604,6 +604,35 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return; // Renaming in the upload queue is successful
         }
 
+        // Detect album folder rename: both paths must be top-level directories (no filename segment)
+        let oldPathInfo: { albumName: string; fileName: string | null } | null = null;
+        let newPathInfo: { albumName: string; fileName: string | null } | null = null;
+        try {
+            oldPathInfo = this.extractPathInfo(oldName);
+            newPathInfo = this.extractPathInfo(newName);
+        } catch {
+            // Path has too many segments — not an album-level rename
+        }
+
+        if (oldPathInfo?.fileName === null && newPathInfo?.fileName === null) {
+            const album = await this.getAlbumOrNullFromCache(oldName, true);
+            if (album) {
+                const newAlbumName = newPathInfo.albumName;
+                if (!isValidFilename(newAlbumName)) {
+                    throw new Error(`Invalid album name: '${newAlbumName}'.`);
+                }
+
+                await this.immichRequest({
+                    method: 'PATCH',
+                    endpoint: `albums/${album.id}`,
+                    data: JSON.stringify({ albumName: newAlbumName }),
+                    logAction: 'Rename album',
+                });
+                this.albumsCache = await this.fetchAlbums();
+                return;
+            }
+        }
+
         //File not found
         throw new Error("Rename not support for Immich backend. Expect for tmp files (files that have been upload with OPEN, WRITE, CLOSE, but not jet sent to Immich in SETSTAT).");
     }
