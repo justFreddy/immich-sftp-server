@@ -223,7 +223,7 @@ To disable persistent settings storage, remove the `volumes` entry and either re
 - `ASSET_DOWNLOAD_SOURCE` (default: `original`) – `original` or `preview`
 - `ENABLE_TAGS_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for tags is unavailable
 - `ENABLE_PEOPLE_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for people is unavailable
-- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path (supports `{username}` and `{safeUsername}` placeholders)
+- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path (supports `{userId}` placeholder)
 
 ### Optional YAML settings file (repository/container root)
 
@@ -244,9 +244,9 @@ Environment variables still take precedence over YAML values.
 
 Per-user settings are supported:
 
-- The per-user identifier comes from the authenticated Immich user (`users/me.username`, then `users/me.email` as fallback).
-- If `SETTINGS_FILE` is `./immich-network-storage.yaml`, the server first checks `./immich-network-storage.<safeUsername>.yaml` (`safeUsername` keeps `a-z`, `A-Z`, `0-9`, `.`, `_`, `-` and replaces all other characters with `_`) and then falls back to `./immich-network-storage.yaml`.
-- You can also set an explicit per-user template like `SETTINGS_FILE=/config/immich-network-storage.{safeUsername}.yaml` (or `{username}` if you want the raw value).
+- The per-user identifier is the Immich **user ID (UUID)** from the `users/me` API endpoint — stable even if the user renames their account.
+- If `SETTINGS_FILE` is `./immich-network-storage.yaml`, the server first checks `./immich-network-storage.<userId>.yaml` (e.g. `immich-network-storage.550e8400-e29b-41d4-a716-446655440000.yaml`) and then falls back to `./immich-network-storage.yaml`.
+- You can also set an explicit per-user template like `SETTINGS_FILE=/config/immich-network-storage.{userId}.yaml`.
 - To keep per-user settings persistent in Docker, mount a volume for the settings directory (for example `./immich-network-storage-config:/config`).
 
 ### Connect / Test it ✅

@@ -130,36 +130,23 @@ function getOptionalNestedBoolean(source: Record<string, unknown>, path: string[
   return undefined;
 }
 
-function buildPerUserSettingsFilePath(settingsFilePath: string, username: string): string {
+function buildPerUserSettingsFilePath(settingsFilePath: string, userId: string): string {
   const parsed = path.parse(settingsFilePath);
-  const fileName = `${parsed.name}.${username}${parsed.ext}`;
+  const fileName = `${parsed.name}.${userId}${parsed.ext}`;
   return parsed.dir ? path.join(parsed.dir, fileName) : fileName;
 }
 
-function toSafeSettingsUserToken(username: string): string {
-  const normalized = username.trim();
-  if (!normalized) {
-    return '';
-  }
-  return normalized.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function resolveSettingsFilePath(username?: string): string | undefined {
+function resolveSettingsFilePath(userId?: string): string | undefined {
   const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-network-storage.yaml');
   const candidates: string[] = [];
-  const normalizedUserName = username?.trim();
-  if (normalizedUserName) {
-    const safeUserName = toSafeSettingsUserToken(normalizedUserName);
-    if (settingsFilePath.includes('{safeUsername}')) {
-      candidates.push(settingsFilePath.replace(/\{safeUsername\}/g, safeUserName));
+  const normalizedUserId = userId?.trim();
+  if (normalizedUserId && UUID_PATTERN.test(normalizedUserId)) {
+    if (settingsFilePath.includes('{userId}')) {
+      candidates.push(settingsFilePath.replace(/\{userId\}/g, normalizedUserId));
     }
-    if (settingsFilePath.includes('{username}')) {
-      candidates.push(settingsFilePath.replace(/\{username\}/g, normalizedUserName));
-    }
-    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, safeUserName));
-    if (safeUserName !== normalizedUserName) {
-      candidates.push(buildPerUserSettingsFilePath(settingsFilePath, normalizedUserName));
-    }
+    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, normalizedUserId));
   }
   candidates.push(settingsFilePath);
 
@@ -171,8 +158,8 @@ function resolveSettingsFilePath(username?: string): string | undefined {
   return undefined;
 }
 
-function loadYamlSettingsFile(username?: string): Record<string, unknown> {
-  const settingsFilePath = resolveSettingsFilePath(username);
+function loadYamlSettingsFile(userId?: string): Record<string, unknown> {
+  const settingsFilePath = resolveSettingsFilePath(userId);
   if (!settingsFilePath) {
     return {};
   }
@@ -185,8 +172,8 @@ function loadYamlSettingsFile(username?: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function readYamlSettingOverrides(username?: string): Partial<UserScopedSettings> {
-  const yamlSettings = loadYamlSettingsFile(username);
+function readYamlSettingOverrides(userId?: string): Partial<UserScopedSettings> {
+  const yamlSettings = loadYamlSettingsFile(userId);
   return {
     assetFileNamePattern: parseAssetFileNamePattern(
       getOptionalNestedString(yamlSettings, ['assetFileNamePattern']) ?? getOptionalNestedString(yamlSettings, ['asset', 'fileNamePattern']),
@@ -201,8 +188,8 @@ function readYamlSettingOverrides(username?: string): Partial<UserScopedSettings
   };
 }
 
-export function loadSettingsForUser(username?: string): UserScopedSettings {
-  const yamlOverrides = readYamlSettingOverrides(username);
+export function loadSettingsForUser(userId?: string): UserScopedSettings {
+  const yamlOverrides = readYamlSettingOverrides(userId);
   return {
     assetFileNamePattern: yamlOverrides.assetFileNamePattern ?? config.assetFileNamePattern,
     assetDownloadSource: yamlOverrides.assetDownloadSource ?? config.assetDownloadSource,

@@ -52,6 +52,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
     private currentUser: ImmichUser | null = null;
     private collectionVisibilityCache: { tagsEnabled: boolean; peopleEnabled: boolean } | null = null;
+    // Global defaults before a user logs in; replaced by loadUserScopedSettings() after authentication.
     private userScopedSettings: UserScopedSettings = loadSettingsForUser();
 
     async login(username: string, password: string): Promise<void> {
@@ -86,7 +87,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             await this.fetchCurrentUser(trimmedUsername);
         }
 
-        this.loadUserScopedSettings(trimmedUsername);
+        this.loadUserScopedSettings();
     }
     async logout(): Promise<void> {
         if (this.shouldLogoutSession) {
@@ -1396,18 +1397,16 @@ export class ImmichFileSystem implements VirtualFileSystem {
             skipResponseLog: true,
         });
         this.currentUser = extractCurrentUser(me, 'api-key');
-        this.loadUserScopedSettings(this.currentUser.username);
+        this.loadUserScopedSettings();
     }
 
     private getTrimmedString(value: unknown): string {
         return typeof value === 'string' ? value.trim() : '';
     }
 
-    private loadUserScopedSettings(fallbackUsername: string): void {
-        const preferredUserName = this.getTrimmedString(this.currentUser?.username)
-            || this.getTrimmedString(this.currentUser?.email)
-            || this.getTrimmedString(fallbackUsername);
-        this.userScopedSettings = loadSettingsForUser(preferredUserName);
+    private loadUserScopedSettings(): void {
+        const userId = this.getTrimmedString(this.currentUser?.id);
+        this.userScopedSettings = loadSettingsForUser(userId || undefined);
     }
 
     // Remove trailing slashes from the Immich host URL

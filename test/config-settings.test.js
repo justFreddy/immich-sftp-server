@@ -31,10 +31,10 @@ process.stdout.write(JSON.stringify({
   return JSON.parse(output);
 }
 
-function readUserSettings(username, extraEnv = {}, cwd = path.resolve(__dirname, '..')) {
+function readUserSettings(userId, extraEnv = {}, cwd = path.resolve(__dirname, '..')) {
   const script = `
 const { loadSettingsForUser } = require(${JSON.stringify(configModulePath)});
-process.stdout.write(JSON.stringify(loadSettingsForUser(${JSON.stringify(username)})));
+process.stdout.write(JSON.stringify(loadSettingsForUser(${JSON.stringify(userId)})));
 `;
   const output = execFileSync(process.execPath, ['-e', script], {
     cwd,
@@ -130,7 +130,8 @@ virtualFolders:
   people:
     enabledDefault: true
 `);
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.test.user_example.com.yaml'), `asset:
+  // per-user settings file named by Immich user ID (UUID)
+  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.550e8400-e29b-41d4-a716-446655440000.yaml'), `asset:
   fileNamePattern: short_uuid
   downloadSource: preview
 virtualFolders:
@@ -140,7 +141,7 @@ virtualFolders:
     enabledDefault: false
 `);
 
-  const userSettings = readUserSettings('test.user@example.com', {}, tmpDir);
+  const userSettings = readUserSettings('550e8400-e29b-41d4-a716-446655440000', {}, tmpDir);
   assert.deepEqual(userSettings, {
     assetFileNamePattern: 'shortUuid',
     assetDownloadSource: 'preview',
@@ -148,11 +149,33 @@ virtualFolders:
     enablePeopleFolderDefault: false,
   });
 
-  const otherUserSettings = readUserSettings('other.user@example.com', {}, tmpDir);
+  const otherUserSettings = readUserSettings('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {}, tmpDir);
   assert.deepEqual(otherUserSettings, {
     assetFileNamePattern: 'original',
     assetDownloadSource: 'original',
     enableTagsFolderDefault: true,
     enablePeopleFolderDefault: true,
   });
+
+  // non-UUID value is ignored (security guard), falls back to global settings
+  const nonUuidSettings = readUserSettings('not-a-uuid', {}, tmpDir);
+  assert.deepEqual(nonUuidSettings, {
+    assetFileNamePattern: 'original',
+    assetDownloadSource: 'original',
+    enableTagsFolderDefault: true,
+    enablePeopleFolderDefault: true,
+  });
+});
+
+test('{userId} placeholder in SETTINGS_FILE resolves to per-user file', (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(tmpDir, 'settings.550e8400-e29b-41d4-a716-446655440000.yaml'), `asset:
+  fileNamePattern: date
+`);
+
+  const userId = '550e8400-e29b-41d4-a716-446655440000';
+  const settingsFile = path.join(tmpDir, 'settings.{userId}.yaml');
+  const userSettings = readUserSettings(userId, { SETTINGS_FILE: settingsFile }, tmpDir);
+  assert.equal(userSettings.assetFileNamePattern, 'date');
 });
