@@ -251,7 +251,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     // Listing /albums — return list of albums
                     this.albumsCache = await this.fetchAlbums();
                     return this.albumsCache.map((album) => ({
-                        name: album.albumName,
+                        name: album.displayName ?? album.albumName,
                         isDir: true,
                         size: 0,
                         mtime: getAlbumMtime(album),
@@ -807,19 +807,25 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return [];
         }
 
-        // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item): ImmichAlbum => mapAlbumFromApi(item as ImmichAlbumApiResponse));
+        // Map response to ImmichAlbum objects, sanitizing album names for use as folder names
+        const albums: ImmichAlbum[] = response.map((item): ImmichAlbum => {
+            const base = mapAlbumFromApi(item as ImmichAlbumApiResponse);
+            return {
+                ...base,
+                displayName: this.normalizeFolderDisplayName(base.albumName, 'album', base.id),
+            };
+        });
 
         // Filter out albums whose description contains "#nosync"
         let filteredAlbums = albums.filter(album => !hasNoSyncTag(album.description));
 
-        // Filter out albums with empty or invalid names
-        filteredAlbums = filteredAlbums.filter(album => isValidFilename(album.albumName));
+        // Filter out albums with empty or invalid display names
+        filteredAlbums = filteredAlbums.filter(album => isValidFilename(album.displayName!));
 
-        // Filter out duplicate album names (case-insensitive)
+        // Filter out duplicate display names (case-insensitive)
         const seenNames = new Set<string>();
         filteredAlbums = filteredAlbums.filter(album => {
-            const lowerName = album.albumName.toLowerCase();
+            const lowerName = album.displayName!.toLowerCase();
             if (seenNames.has(lowerName)) return false;
             seenNames.add(lowerName);
             return true;
@@ -1252,7 +1258,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         } catch {
             return null;
         }
-        return this.albumsCache.find(a => a.albumName === folderName) || null;
+        return this.albumsCache.find(a => (a.displayName ?? a.albumName) === folderName) || null;
     }
     private async getAssetFromCache(filename: string, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
         const asset = await this.getAssetOrNullFromCache(filename, refreshAssetsForThisAlbum);
@@ -1572,6 +1578,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 //Data Classes
 interface ImmichAlbum extends ImmichAlbumBase {
     assets?: ImmichAsset[];
+    displayName?: string;
 }
 
 interface ImmichAsset {
