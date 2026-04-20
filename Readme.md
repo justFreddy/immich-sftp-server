@@ -223,7 +223,7 @@ To disable persistent settings storage, remove the `volumes` entry and either re
 - `ASSET_DOWNLOAD_SOURCE` (default: `original`) – `original` or `preview`
 - `ENABLE_TAGS_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for tags is unavailable
 - `ENABLE_PEOPLE_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for people is unavailable
-- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path (supports `{username}` placeholder)
+- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path (supports `{username}` and `{safeUsername}` placeholders)
 
 ### Optional YAML settings file (repository/container root)
 
@@ -244,8 +244,9 @@ Environment variables still take precedence over YAML values.
 
 Per-user settings are supported:
 
-- If `SETTINGS_FILE` is `./immich-network-storage.yaml`, the server first checks `./immich-network-storage.<username>.yaml` for the logged-in user and falls back to `./immich-network-storage.yaml`.
-- You can also set an explicit per-user template like `SETTINGS_FILE=/config/immich-network-storage.{username}.yaml`.
+- The per-user identifier comes from the authenticated Immich user (`users/me.username`, then `users/me.email` as fallback).
+- If `SETTINGS_FILE` is `./immich-network-storage.yaml`, the server first checks `./immich-network-storage.<safeUsername>.yaml` (`safeUsername` keeps `a-z`, `A-Z`, `0-9`, `.`, `_`, `-` and replaces all other characters with `_`) and then falls back to `./immich-network-storage.yaml`.
+- You can also set an explicit per-user template like `SETTINGS_FILE=/config/immich-network-storage.{safeUsername}.yaml` (or `{username}` if you want the raw value).
 - To keep per-user settings persistent in Docker, mount a volume for the settings directory (for example `./immich-network-storage-config:/config`).
 
 ### Connect / Test it ✅

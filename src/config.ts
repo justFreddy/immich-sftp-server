@@ -136,19 +136,34 @@ function buildPerUserSettingsFilePath(settingsFilePath: string, username: string
   return parsed.dir ? path.join(parsed.dir, fileName) : fileName;
 }
 
+function toSafeSettingsUserToken(username: string): string {
+  const normalized = username.trim();
+  if (!normalized) {
+    return '';
+  }
+  return normalized.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
 function resolveSettingsFilePath(username?: string): string | undefined {
   const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-network-storage.yaml');
   const candidates: string[] = [];
   const normalizedUserName = username?.trim();
   if (normalizedUserName) {
-    if (settingsFilePath.includes('{username}')) {
-      candidates.push(settingsFilePath.replaceAll('{username}', normalizedUserName));
+    const safeUserName = toSafeSettingsUserToken(normalizedUserName);
+    if (settingsFilePath.includes('{safeUsername}')) {
+      candidates.push(settingsFilePath.replace(/\{safeUsername\}/g, safeUserName));
     }
-    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, normalizedUserName));
+    if (settingsFilePath.includes('{username}')) {
+      candidates.push(settingsFilePath.replace(/\{username\}/g, normalizedUserName));
+    }
+    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, safeUserName));
+    if (safeUserName !== normalizedUserName) {
+      candidates.push(buildPerUserSettingsFilePath(settingsFilePath, normalizedUserName));
+    }
   }
   candidates.push(settingsFilePath);
 
-  for (const candidatePath of candidates) {
+  for (const candidatePath of new Set(candidates)) {
     if (fs.existsSync(candidatePath)) {
       return candidatePath;
     }

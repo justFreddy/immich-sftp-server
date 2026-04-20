@@ -130,7 +130,7 @@ virtualFolders:
   people:
     enabledDefault: true
 `);
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.test.user@example.com.yaml'), `asset:
+  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.test.user_example.com.yaml'), `asset:
   fileNamePattern: short_uuid
   downloadSource: preview
 virtualFolders:

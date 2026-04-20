@@ -1399,10 +1399,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
         this.loadUserScopedSettings(this.currentUser.username);
     }
 
+    private getTrimmedString(value: unknown): string {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
     private loadUserScopedSettings(fallbackUsername: string): void {
-        const preferredUserName = this.currentUser?.username?.trim()
-            || this.currentUser?.email?.trim()
-            || fallbackUsername.trim();
+        const preferredUserName = this.getTrimmedString(this.currentUser?.username)
+            || this.getTrimmedString(this.currentUser?.email)
+            || this.getTrimmedString(fallbackUsername);
         this.userScopedSettings = loadSettingsForUser(preferredUserName);
     }
 
