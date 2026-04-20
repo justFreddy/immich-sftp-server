@@ -712,7 +712,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
     private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
         try {
-            console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, this.filterLogData(data));
+            const isLoginEndpoint = endpoint === 'auth/login';
+            const logData = isLoginEndpoint ? '[Sensitive payload redacted]' : this.filterLogData(data);
+            console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, logData);
 
             const isDownload = method === 'GET' && endpoint.startsWith('assets/') && (endpoint.endsWith('/original') || endpoint.endsWith('/thumbnail'));
 
