@@ -18,13 +18,16 @@ interface ImmichWebdavUser extends webdav.IUser {
 
 interface CachedUser {
   readonly user: ImmichWebdavUser;
+  // Stored for timing-safe comparison on subsequent requests (not used for
+  // persistent storage – the session lives only in process memory).
+  readonly passwordBuf: Buffer;
   lastUsed: number;
 }
 
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-// Cache keyed by sha256(username + ':' + password) so we reuse the same
-// ImmichFileSystem across requests and avoid logging in on every request.
+// Cache keyed by username.  The stored passwordBuf is compared in
+// constant-time on every cache hit to guard against session hijacking.
 const userCache = new Map<string, CachedUser>();
 
 function pruneUserCache(): void {
@@ -39,6 +42,14 @@ function pruneUserCache(): void {
 
 setInterval(pruneUserCache, 5 * 60 * 1000).unref();
 
+/** Call a webdav-server success callback.  The library's TS types declare the
+ *  first argument as `Error` (never null/undefined), but the runtime checks
+ *  truthiness; `undefined!` is the standard non-null-assertion way to satisfy
+ *  the compiler while passing the falsy sentinel that the library expects. */
+function cbOk<T>(callback: (err: Error, value?: T) => void, value: T): void {
+  callback(undefined!, value);
+}
+
 class ImmichWebdavUserManager implements webdav.ITestableUserManager {
   getDefaultUser(callback: (user: webdav.IUser) => void): void {
     callback({ uid: 'default', username: 'anonymous', isDefaultUser: true });
@@ -49,16 +60,24 @@ class ImmichWebdavUserManager implements webdav.ITestableUserManager {
     password: string,
     callback: (error: Error, user?: webdav.IUser) => void,
   ): void {
-    const key = crypto
-      .createHash('sha256')
-      .update(`${username}:${password}`)
-      .digest('hex');
+    const passwordBuf = Buffer.from(password, 'utf8');
+    const cached = userCache.get(username);
 
-    const cached = userCache.get(key);
     if (cached) {
-      cached.lastUsed = Date.now();
-      callback(undefined as unknown as Error, cached.user);
-      return;
+      const storedBuf = cached.passwordBuf;
+      const match =
+        storedBuf.length === passwordBuf.length &&
+        crypto.timingSafeEqual(storedBuf, passwordBuf);
+
+      if (match) {
+        cached.lastUsed = Date.now();
+        cbOk(callback, cached.user);
+        return;
+      }
+
+      // Different password for the same username → evict stale session.
+      cached.user.fsBackend.logout().catch(() => {});
+      userCache.delete(username);
     }
 
     const fsBackend = new ImmichFileSystem();
@@ -66,8 +85,8 @@ class ImmichWebdavUserManager implements webdav.ITestableUserManager {
       .login(username, password)
       .then(() => {
         const user: ImmichWebdavUser = { uid: username, username, fsBackend };
-        userCache.set(key, { user, lastUsed: Date.now() });
-        callback(undefined as unknown as Error, user);
+        userCache.set(username, { user, passwordBuf, lastUsed: Date.now() });
+        cbOk(callback, user);
       })
       .catch(() => {
         callback(new Error('Authentication failed'));
