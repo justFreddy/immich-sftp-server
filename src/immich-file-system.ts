@@ -50,7 +50,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const trimmedPassword = password.trim();
 
         if (trimmedPassword === '' || !this.looksLikeEmail(trimmedUsername)) {
-            await this.loginWithToken(trimmedUsername);
+            await this.loginWithApiKey(trimmedUsername);
             return;
         }
 
@@ -676,12 +676,12 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     }
 
-    private async loginWithToken(token: string): Promise<void> {
-        if (!token) {
-            throw new Error('Token login requires a non-empty token as username.');
+    private async loginWithApiKey(apiKey: string): Promise<void> {
+        if (!apiKey) {
+            throw new Error('API key login requires a non-empty API key as username.');
         }
 
-        this.immichAccessToken = token;
+        this.immichAccessToken = apiKey;
         this.shouldLogoutSession = false;
 
         this.authMode = 'bearer';
@@ -689,13 +689,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
             const me = await this.immichRequest({
                 method: 'GET',
                 endpoint: 'users/me',
-                logAction: 'Current user (token)',
+                logAction: 'Current user (api key bearer)',
                 skipResponseLog: true,
             });
-            this.currentUser = extractCurrentUser(me, 'token');
+            this.currentUser = extractCurrentUser(me, 'api-key');
             return;
         } catch {
-            // Fall through to API key mode
+            // Fall through to x-api-key header mode
         }
 
         this.authMode = 'api-key';
@@ -705,7 +705,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             logAction: 'Current user (api key)',
             skipResponseLog: true,
         });
-        this.currentUser = extractCurrentUser(me, 'token');
+        this.currentUser = extractCurrentUser(me, 'api-key');
     }
 
     // Remove trailing slashes from the Immich host URL
