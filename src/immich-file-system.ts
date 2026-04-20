@@ -49,8 +49,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const trimmedUsername = username.trim();
         const trimmedPassword = password.trim();
 
-        if (trimmedPassword === '' || !this.looksLikeEmail(trimmedUsername)) {
-            await this.loginWithApiKey(trimmedUsername);
+        if (trimmedUsername === 'apikey') {
+            await this.loginWithApiKey(trimmedPassword);
             return;
         }
 
@@ -678,7 +678,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
     private async loginWithApiKey(apiKey: string): Promise<void> {
         if (!apiKey) {
-            throw new Error('API key login requires a non-empty API key as username.');
+            throw new Error('API key login requires a non-empty API key as password.');
         }
 
         this.immichAccessToken = apiKey;

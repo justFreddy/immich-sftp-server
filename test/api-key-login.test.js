@@ -28,7 +28,7 @@ test('api key login via username uses x-api-key header', async () => {
   });
 
   try {
-    await runImmichSession(server.baseUrl, 'immich-api-key-value', '');
+    await runImmichSession(server.baseUrl, 'apikey', 'immich-api-key-value');
   } finally {
     await server.close();
   }
