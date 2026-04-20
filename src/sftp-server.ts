@@ -24,8 +24,8 @@ interface ImmichSftpConnection extends Connection {
 }
 
 function createEphemeralHostKeySync(): Buffer {
-  const { privateKey } = crypto.generateKeyPairSync('ed25519');
-  return privateKey.export({ format: 'pem', type: 'pkcs8' }) as Buffer;
+  const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  return Buffer.from(privateKey.export({ format: 'pem', type: 'pkcs1' }));
 }
 
 const hostKey = createEphemeralHostKeySync();
