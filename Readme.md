@@ -1,6 +1,8 @@
 # Immich Network Storage
 
-An **SFTP/FTP/WebDAV “bridge” for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP, FTP, or WebDAV client.
+This repository is a **fork** of the original Immich Network Storage project with additional features and ongoing improvements.
+
+It is an **SFTP/FTP/WebDAV bridge for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP, FTP, or WebDAV client.
 
 ## Ideas to use this 💡
 
@@ -9,13 +11,6 @@ An **SFTP/FTP/WebDAV “bridge” for Immich**: browse your Immich albums like f
 - Synchronize or connect Immich with any file-based third-party system
 - Maybe for backups? (Important and recommended: Do proper backups of the whole Immich instance — see https://docs.immich.app/administration/backup-and-restore/)
 
-
-## Motivation & background 
-
-I’m a Nextcloud user for many years and I’m really happy with it. I have always synchronized my photos and videos with the FolderSync app for Android, which is a very reliable solution, even for large libraries (400 GB+). But no matter what you do, Nextcloud will never get a media management system as good as Immich. At the same time, Immich is still lacking a good two-way synchronization.  
-
-That’s why I came up with this solution. It allows me to reliably sync thousands and tens of thousands of media files with Immich and get reliable reports in the sync app.
-It also allows me to do most of the photo sorting on the phone, which is then reflected in Immich. And if I do some sorting on the computer in Immich, it will be reflected back to the phone.
 
 ## Important technical facts 
 
@@ -112,61 +107,7 @@ Any file can be downloaded from SFTP:
 
 You can run all protocols in parallel. SFTP, FTP, and WebDAV can be enabled/disabled independently with environment variables.
 
-### Install on the Immich stack (recommended)
-
-```diff
-name: immich
-
-services:
-  immich-server:
-    container_name: immich_server
-    [...]
-
-  immich-machine-learning:
-    container_name: immich_machine_learning
-    [...]
-  
-  redis:
-    container_name: immich_redis
-    [...]
-
-  database:
-    container_name: immich_postgres
-     [...]
-  
-+ immich-network-storage:
-+   container_name: immich_network_storage
-+   image: ghcr.io/demian98/immich-sftp-server:latest 
- +   ports:
- +    - "22832:22" # SFTP
- +    - "22100:21" # FTP
- +    - "19000:1900" # WebDAV
- +    - "30000-30010:30000-30010" # FTP passive data ports (optional, if passive mode is enabled)
-  +   environment:
-  +     IMMICH_HOST: http://immich-server:2283
- +     TZ: Europe/Berlin
- +     ENABLE_SFTP: "true"
- +     ENABLE_FTP: "false"
- +     ENABLE_SMB: "false"
- +     ENABLE_WEBDAV: "false"
- +     SFTP_PORT: "22"
- +     FTP_PORT: "21"
- +     WEBDAV_PORT: "1900"
- +     FTP_PASSIVE_HOST: "your.public.hostname"
- +     FTP_PASSIVE_PORT_MIN: "30000"
-  +     FTP_PASSIVE_PORT_MAX: "30010"
-  +     LISTEN_HOST: "0.0.0.0"
-  +     SETTINGS_FILE: "/config/immich-network-storage.yaml"
-  +   volumes:
-  +     - ./immich-network-storage-config:/config
-  +   restart: unless-stopped
-
-volumes:
-  [...]
-
-```
-
-### Standalone
+You can run this service standalone, and it is also possible to add the same service block into an existing Immich Docker Compose stack.
 
 ```yaml
 services:
@@ -183,7 +124,6 @@ services:
       TZ: <your TZ>
       ENABLE_SFTP: "true"
       ENABLE_FTP: "false"
-      ENABLE_SMB: "false"
       ENABLE_WEBDAV: "false"
       SFTP_PORT: "22"
       FTP_PORT: "21"
@@ -202,28 +142,26 @@ To disable persistent settings storage, remove the `volumes` entry and either re
 
 ### Environment variables
 
-- `IMMICH_HOST` (**required**) – base URL of your Immich server (for example `http://immich-server:2283`)
-- `TZ` (default: `UTC`) – timezone used for metadata timestamps (for example `Europe/Berlin`)
-- `ENABLE_SFTP` (default: `true`) – enable/disable SFTP server
-- `ENABLE_FTP` (default: `false`) – enable/disable FTP server
-- `ENABLE_SMB` (default: `false`) – enable/disable SMB server (currently not implemented)
-- `ENABLE_WEBDAV` (default: `false`) – enable/disable WebDAV server
-- `SFTP_PORT` (default: `22`) – internal SFTP listen port
-- `FTP_PORT` (default: `21`) – internal FTP listen port
-- `WEBDAV_PORT` (default: `1900`) – internal WebDAV listen port
-- `FTP_PASSIVE_HOST` (optional) – hostname or public IP returned to FTP clients for passive mode
-- `FTP_PASSIVE_PORT_MIN` / `FTP_PASSIVE_PORT_MAX` (optional) – passive FTP data port range; set both or neither
-- `LISTEN_HOST` (default: `0.0.0.0`) – bind address for all servers
-- `ASSET_FILENAME_PATTERN` (default: `original`) – one of:
-  - `original` → original filename
-  - `assetUuid`/`asset_uuid`/`uuid` → full asset UUID + original extension
-  - `shortUuid`/`short_uuid` → `img_<first8uuid>` + original extension
-  - `date` → `YYYYMMDD_HHMMSSmmm` + original extension
-  - `dateUuid`/`date_uuid` → `YYYYMMDD_HHMMSSmmm_<first8uuid>` + original extension
-- `ASSET_DOWNLOAD_SOURCE` (default: `original`) – `original` or `preview`
-- `ENABLE_TAGS_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for tags is unavailable
-- `ENABLE_PEOPLE_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for people is unavailable
-- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path (supports `{userId}` placeholder)
+| Variable | Default | Description |
+|---|---|---|
+| `IMMICH_HOST` | *(required)* | Base URL of your Immich server (for example `http://immich-server:2283`). |
+| `TZ` | `UTC` | Timezone used for metadata timestamps (for example `Europe/Berlin`). |
+| `HOST_KEY_DIR` | `/data/ssh-host-key` in Docker, `./data/ssh-host-key` outside Docker | Directory for persisted SFTP host keys. |
+| `LISTEN_HOST` | `0.0.0.0` | Bind address for all enabled servers. |
+| `ENABLE_SFTP` | `true` | Enable or disable the SFTP server. |
+| `SFTP_PORT` | `22` | Internal SFTP listen port. |
+| `ENABLE_FTP` | `false` | Enable or disable the FTP server. |
+| `FTP_PORT` | `21` | Internal FTP listen port. |
+| `FTP_PASSIVE_HOST` | *(unset)* | Hostname/public IP returned to FTP clients in passive mode. |
+| `FTP_PASSIVE_PORT_MIN` | *(unset)* | Passive FTP port range start (must be set together with `FTP_PASSIVE_PORT_MAX`). |
+| `FTP_PASSIVE_PORT_MAX` | *(unset)* | Passive FTP port range end (must be set together with `FTP_PASSIVE_PORT_MIN`). |
+| `ENABLE_WEBDAV` | `false` | Enable or disable the WebDAV server. |
+| `WEBDAV_PORT` | `1900` | Internal WebDAV listen port. |
+| `ASSET_FILENAME_PATTERN` | `original` | Asset file naming mode: `original`, `assetUuid`/`asset_uuid`/`uuid`, `shortUuid`/`short_uuid`, `date`, `dateUuid`/`date_uuid`. |
+| `ASSET_DOWNLOAD_SOURCE` | `original` | Download source mode: `original` or `preview` (`thumbnail` is accepted as alias for `preview`). |
+| `ENABLE_TAGS_FOLDER_DEFAULT` | `true` | Fallback default if Immich user preference for tags is unavailable. |
+| `ENABLE_PEOPLE_FOLDER_DEFAULT` | `true` | Fallback default if Immich user preference for people is unavailable. |
+| `SETTINGS_FILE` | `./immich-network-storage.yaml` | Optional YAML settings file path (supports `{userId}` placeholder). |
 
 ### Optional YAML settings file (repository/container root)
 
