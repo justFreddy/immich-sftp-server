@@ -90,7 +90,7 @@ export async function applyAlbumMetadataFileContent({
         throw new Error('Blocked save: only the album owner can edit album.yaml.');
     }
 
-    const newDescription = mergeNoSyncTag(metadata.album.description, metadata.settings.hiddenFromSftp);
+    const newDescription = mergeNoSyncTag(metadata.album.description, metadata.settings.hidden);
     if ((album.description ?? '') !== newDescription) {
         await immichRequest({
             method: 'PATCH',

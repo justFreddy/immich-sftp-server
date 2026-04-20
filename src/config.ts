@@ -98,7 +98,7 @@ function getOptionalNestedString(source: Record<string, unknown>, path: string[]
 }
 
 function loadYamlSettingsFile(): Record<string, unknown> {
-  const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-sftp-server.yaml');
+  const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-network-storage.yaml');
   if (!fs.existsSync(settingsFilePath)) {
     return {};
   }
@@ -189,6 +189,9 @@ export const config = (() => {
     ftpPassivePortMax,
     enableSftp: getEnvBoolean('ENABLE_SFTP', true),
     enableFtp: getEnvBoolean('ENABLE_FTP', false),
+    enableSmb: getEnvBoolean('ENABLE_SMB', false),
+    enableWebdav: getEnvBoolean('ENABLE_WEBDAV', false),
+    webdavPort: getEnvNumber('WEBDAV_PORT', 1900),
     assetFileNamePattern: envFileNamePattern ?? yamlFileNamePattern ?? 'original',
     assetDownloadSource: envDownloadSource ?? yamlDownloadSource ?? 'original',
   };
