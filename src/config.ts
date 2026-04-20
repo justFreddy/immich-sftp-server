@@ -1,8 +1,15 @@
 import fs from 'fs';
+import path from 'path';
 import YAML from 'yaml';
 
 export type AssetFileNamePattern = 'original' | 'assetUuid' | 'shortUuid' | 'date' | 'dateUuid';
 export type AssetDownloadSource = 'original' | 'preview';
+export type UserScopedSettings = {
+  assetFileNamePattern: AssetFileNamePattern;
+  assetDownloadSource: AssetDownloadSource;
+  enableTagsFolderDefault: boolean;
+  enablePeopleFolderDefault: boolean;
+};
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -123,9 +130,37 @@ function getOptionalNestedBoolean(source: Record<string, unknown>, path: string[
   return undefined;
 }
 
-function loadYamlSettingsFile(): Record<string, unknown> {
+function buildPerUserSettingsFilePath(settingsFilePath: string, userId: string): string {
+  const parsed = path.parse(settingsFilePath);
+  const fileName = `${parsed.name}.${userId}${parsed.ext}`;
+  return parsed.dir ? path.join(parsed.dir, fileName) : fileName;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function resolveSettingsFilePath(userId?: string): string | undefined {
   const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-network-storage.yaml');
-  if (!fs.existsSync(settingsFilePath)) {
+  const candidates: string[] = [];
+  const normalizedUserId = userId?.trim();
+  if (normalizedUserId && UUID_PATTERN.test(normalizedUserId)) {
+    if (settingsFilePath.includes('{userId}')) {
+      candidates.push(settingsFilePath.replace(/\{userId\}/g, normalizedUserId));
+    }
+    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, normalizedUserId));
+  }
+  candidates.push(settingsFilePath);
+
+  for (const candidatePath of new Set(candidates)) {
+    if (fs.existsSync(candidatePath)) {
+      return candidatePath;
+    }
+  }
+  return undefined;
+}
+
+function loadYamlSettingsFile(userId?: string): Record<string, unknown> {
+  const settingsFilePath = resolveSettingsFilePath(userId);
+  if (!settingsFilePath) {
     return {};
   }
 
@@ -135,6 +170,32 @@ function loadYamlSettingsFile(): Record<string, unknown> {
     throw new Error(`Invalid settings file '${settingsFilePath}': expected a YAML object.`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function readYamlSettingOverrides(userId?: string): Partial<UserScopedSettings> {
+  const yamlSettings = loadYamlSettingsFile(userId);
+  return {
+    assetFileNamePattern: parseAssetFileNamePattern(
+      getOptionalNestedString(yamlSettings, ['assetFileNamePattern']) ?? getOptionalNestedString(yamlSettings, ['asset', 'fileNamePattern']),
+      'settings file',
+    ),
+    assetDownloadSource: parseAssetDownloadSource(
+      getOptionalNestedString(yamlSettings, ['assetDownloadSource']) ?? getOptionalNestedString(yamlSettings, ['asset', 'downloadSource']),
+      'settings file',
+    ),
+    enableTagsFolderDefault: getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'tags', 'enabledDefault']),
+    enablePeopleFolderDefault: getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'people', 'enabledDefault']),
+  };
+}
+
+export function loadSettingsForUser(userId?: string): UserScopedSettings {
+  const yamlOverrides = readYamlSettingOverrides(userId);
+  return {
+    assetFileNamePattern: yamlOverrides.assetFileNamePattern ?? config.assetFileNamePattern,
+    assetDownloadSource: yamlOverrides.assetDownloadSource ?? config.assetDownloadSource,
+    enableTagsFolderDefault: yamlOverrides.enableTagsFolderDefault ?? config.enableTagsFolderDefault,
+    enablePeopleFolderDefault: yamlOverrides.enablePeopleFolderDefault ?? config.enablePeopleFolderDefault,
+  };
 }
 
 function parseAssetFileNamePattern(value: string | undefined, source: string): AssetFileNamePattern | undefined {
@@ -182,7 +243,7 @@ function parseAssetDownloadSource(value: string | undefined, source: string): As
 export const config = (() => {
   const ftpPassivePortMin = getOptionalEnvNumber('FTP_PASSIVE_PORT_MIN');
   const ftpPassivePortMax = getOptionalEnvNumber('FTP_PASSIVE_PORT_MAX');
-  const yamlSettings = loadYamlSettingsFile();
+  const yamlOverrides = readYamlSettingOverrides();
 
   if ((ftpPassivePortMin == null) !== (ftpPassivePortMax == null)) {
     throw new Error('FTP_PASSIVE_PORT_MIN and FTP_PASSIVE_PORT_MAX must both be set or both be unset.');
@@ -191,19 +252,8 @@ export const config = (() => {
     throw new Error('FTP_PASSIVE_PORT_MIN must be less than or equal to FTP_PASSIVE_PORT_MAX.');
   }
 
-  // Support both top-level and nested keys to keep settings flexible and backward compatible.
-  const yamlFileNamePattern = parseAssetFileNamePattern(
-    getOptionalNestedString(yamlSettings, ['assetFileNamePattern']) ?? getOptionalNestedString(yamlSettings, ['asset', 'fileNamePattern']),
-    'settings file',
-  );
-  const yamlDownloadSource = parseAssetDownloadSource(
-    getOptionalNestedString(yamlSettings, ['assetDownloadSource']) ?? getOptionalNestedString(yamlSettings, ['asset', 'downloadSource']),
-    'settings file',
-  );
   const envFileNamePattern = parseAssetFileNamePattern(getOptionalEnv('ASSET_FILENAME_PATTERN'), 'environment variable ASSET_FILENAME_PATTERN');
   const envDownloadSource = parseAssetDownloadSource(getOptionalEnv('ASSET_DOWNLOAD_SOURCE'), 'environment variable ASSET_DOWNLOAD_SOURCE');
-  const yamlEnableTagsFolderDefault = getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'tags', 'enabledDefault']);
-  const yamlEnablePeopleFolderDefault = getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'people', 'enabledDefault']);
 
   return {
     immichHost: requireEnv('IMMICH_HOST'),
@@ -220,9 +270,9 @@ export const config = (() => {
     enableSmb: getEnvBoolean('ENABLE_SMB', false),
     enableWebdav: getEnvBoolean('ENABLE_WEBDAV', false),
     webdavPort: getEnvNumber('WEBDAV_PORT', 1900),
-    assetFileNamePattern: envFileNamePattern ?? yamlFileNamePattern ?? 'original',
-    assetDownloadSource: envDownloadSource ?? yamlDownloadSource ?? 'original',
-    enableTagsFolderDefault: getEnvBoolean('ENABLE_TAGS_FOLDER_DEFAULT', yamlEnableTagsFolderDefault ?? true),
-    enablePeopleFolderDefault: getEnvBoolean('ENABLE_PEOPLE_FOLDER_DEFAULT', yamlEnablePeopleFolderDefault ?? true),
+    assetFileNamePattern: envFileNamePattern ?? yamlOverrides.assetFileNamePattern ?? 'original',
+    assetDownloadSource: envDownloadSource ?? yamlOverrides.assetDownloadSource ?? 'original',
+    enableTagsFolderDefault: getEnvBoolean('ENABLE_TAGS_FOLDER_DEFAULT', yamlOverrides.enableTagsFolderDefault ?? true),
+    enablePeopleFolderDefault: getEnvBoolean('ENABLE_PEOPLE_FOLDER_DEFAULT', yamlOverrides.enablePeopleFolderDefault ?? true),
   };
 })();

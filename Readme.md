@@ -142,8 +142,8 @@ services:
  +    - "22100:21" # FTP
  +    - "19000:1900" # WebDAV
  +    - "30000-30010:30000-30010" # FTP passive data ports (optional, if passive mode is enabled)
- +   environment:
- +     IMMICH_HOST: http://immich-server:2283
+  +   environment:
+  +     IMMICH_HOST: http://immich-server:2283
  +     TZ: Europe/Berlin
  +     ENABLE_SFTP: "true"
  +     ENABLE_FTP: "false"
@@ -154,9 +154,12 @@ services:
  +     WEBDAV_PORT: "1900"
  +     FTP_PASSIVE_HOST: "your.public.hostname"
  +     FTP_PASSIVE_PORT_MIN: "30000"
- +     FTP_PASSIVE_PORT_MAX: "30010"
- +     LISTEN_HOST: "0.0.0.0"
- +   restart: unless-stopped
+  +     FTP_PASSIVE_PORT_MAX: "30010"
+  +     LISTEN_HOST: "0.0.0.0"
+  +     SETTINGS_FILE: "/config/immich-network-storage.yaml"
+  +   volumes:
+  +     - ./immich-network-storage-config:/config
+  +   restart: unless-stopped
 
 volumes:
   [...]
@@ -189,8 +192,13 @@ services:
       FTP_PASSIVE_PORT_MIN: "30000"
       FTP_PASSIVE_PORT_MAX: "30010"
       LISTEN_HOST: "0.0.0.0"
+      SETTINGS_FILE: "/config/immich-network-storage.yaml"
+    volumes:
+      - ./immich-network-storage-config:/config
     restart: unless-stopped
 ```
+
+To disable persistent settings storage, remove the `volumes` entry and either remove `SETTINGS_FILE` or keep it on the default path (`./immich-network-storage.yaml` inside the container).
 
 ### Environment variables
 
@@ -215,7 +223,7 @@ services:
 - `ASSET_DOWNLOAD_SOURCE` (default: `original`) – `original` or `preview`
 - `ENABLE_TAGS_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for tags is unavailable
 - `ENABLE_PEOPLE_FOLDER_DEFAULT` (default: `true`) – fallback default if Immich user preference for people is unavailable
-- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path
+- `SETTINGS_FILE` (default: `./immich-network-storage.yaml`) – optional YAML settings file path (supports `{userId}` placeholder)
 
 ### Optional YAML settings file (repository/container root)
 
@@ -233,6 +241,13 @@ virtualFolders:
 ```
 
 Environment variables still take precedence over YAML values.
+
+Per-user settings are supported:
+
+- The per-user identifier is the Immich **user ID (UUID)** from the `users/me` API endpoint — stable even if the user renames their account.
+- If `SETTINGS_FILE` is `./immich-network-storage.yaml`, the server first checks `./immich-network-storage.<userId>.yaml` (e.g. `immich-network-storage.550e8400-e29b-41d4-a716-446655440000.yaml`) and then falls back to `./immich-network-storage.yaml`.
+- You can also set an explicit per-user template like `SETTINGS_FILE=/config/immich-network-storage.{userId}.yaml`.
+- To keep per-user settings persistent in Docker, mount a volume for the settings directory (for example `./immich-network-storage-config:/config`).
 
 ### Connect / Test it ✅
 

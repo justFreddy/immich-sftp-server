@@ -2,7 +2,7 @@ import { VirtualFileSystem } from "./virtual-file-system";
 import axios from 'axios';
 import FormData from 'form-data';
 import crypto from 'crypto';
-import { config } from './config';
+import { config, UserScopedSettings, loadSettingsForUser } from './config';
 import fs from 'fs';
 import tmp from 'tmp';
 import { Readable } from 'stream';
@@ -52,6 +52,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
     private currentUser: ImmichUser | null = null;
     private collectionVisibilityCache: { tagsEnabled: boolean; peopleEnabled: boolean } | null = null;
+    // Global defaults before a user logs in; replaced by loadUserScopedSettings() after authentication.
+    private userScopedSettings: UserScopedSettings = loadSettingsForUser();
 
     async login(username: string, password: string): Promise<void> {
         const trimmedUsername = username.trim();
@@ -84,6 +86,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (!this.currentUser?.id || !this.currentUser?.username) {
             await this.fetchCurrentUser(trimmedUsername);
         }
+
+        this.loadUserScopedSettings();
     }
     async logout(): Promise<void> {
         if (this.shouldLogoutSession) {
@@ -99,6 +103,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         this.collectionVisibilityCache = null;
         this.tagsCache = [];
         this.peopleCache = [];
+        this.userScopedSettings = loadSettingsForUser();
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {
@@ -386,7 +391,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         const collectionAsset = await this.getCollectionAssetOrNull(filename, true);
         if (collectionAsset) {
-            const endpoint = config.assetDownloadSource === 'preview'
+            const endpoint = this.userScopedSettings.assetDownloadSource === 'preview'
                 ? `assets/${collectionAsset.id}/thumbnail`
                 : `assets/${collectionAsset.id}/original`;
 
@@ -409,7 +414,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const asset = await this.getAssetFromCache(filename, false);
 
         // Fetch the original file as a buffer
-        const endpoint = config.assetDownloadSource === 'preview'
+        const endpoint = this.userScopedSettings.assetDownloadSource === 'preview'
             ? `assets/${asset.id}/thumbnail`
             : `assets/${asset.id}/original`;
 
@@ -871,8 +876,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return this.collectionVisibilityCache;
         }
 
-        let tagsEnabled = config.enableTagsFolderDefault;
-        let peopleEnabled = config.enablePeopleFolderDefault;
+        let tagsEnabled = this.userScopedSettings.enableTagsFolderDefault;
+        let peopleEnabled = this.userScopedSettings.enablePeopleFolderDefault;
 
         try {
             const preferences = await this.immichRequest({
@@ -1392,6 +1397,16 @@ export class ImmichFileSystem implements VirtualFileSystem {
             skipResponseLog: true,
         });
         this.currentUser = extractCurrentUser(me, 'api-key');
+        this.loadUserScopedSettings();
+    }
+
+    private getTrimmedString(value: unknown): string {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    private loadUserScopedSettings(): void {
+        const userId = this.getTrimmedString(this.currentUser?.id);
+        this.userScopedSettings = loadSettingsForUser(userId || undefined);
     }
 
     // Remove trailing slashes from the Immich host URL
@@ -1537,7 +1552,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const formattedTimestamp = `${dt.toFormat('yyyyLLdd_HHmmss')}${String(dt.millisecond).padStart(3, '0')}`;
         const shortId = asset.id.slice(0, 8);
 
-        switch (config.assetFileNamePattern) {
+        switch (this.userScopedSettings.assetFileNamePattern) {
             case 'assetUuid':
                 return `${asset.id}${extension}`;
             case 'shortUuid':
