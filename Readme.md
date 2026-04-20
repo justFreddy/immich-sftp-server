@@ -26,15 +26,26 @@ It also allows me to do most of the photo sorting on the phone, which is then re
 
 ## How it works ⚙️
 
-### Albums → folders
+### Root structure
 
-- Root (`/`) lists the albums the user has in Immich.
-- Creating a new folder in SFTP/FTP will create a new album in Immich.
+The root (`/`) always shows three virtual top-level folders:
+
+| Folder | Contents |
+|--------|----------|
+| `/albums/` | All Immich albums the user can access |
+| `/tags/` | One subfolder per Immich tag (enabled by default, can be toggled) |
+| `/people/` | One subfolder per recognized person (enabled by default, can be toggled) |
+
+### Albums → `/albums/`
+
+- `/albums/` lists all albums the user has in Immich.
+- Creating a new folder inside `/albums/` (e.g. `/albums/MyAlbum`) creates a new album in Immich.
+- Renaming an album folder (e.g. `/albums/OldName` → `/albums/NewName`) renames the album in Immich.
 - Add `#nosync` somewhere into an album description in Immich to hide it from all network storage protocols (SFTP, FTP, WebDAV).
 
 ### Assets → files
 
-Inside an album folder, files represent assets. Every asset you have added to an album will be shown inside its SFTP folder.
+Inside each album folder under `/albums/<name>/`, files represent assets. Every asset you have added to an album will be shown inside its folder.
 
 The file list you see is completely built from the metadata stored in Immich:
 
@@ -44,7 +55,7 @@ The file list you see is completely built from the metadata stored in Immich:
 
 ### Album metadata files
 
-Each album folder also contains:
+Each album folder (`/albums/<name>/`) also contains:
 
 - `album.yaml`: album settings + metadata (id, owner, shared users/roles, links, etc.)
 - `immich.html`: HTML redirect file to open the album in Immich in a browser
@@ -70,7 +81,7 @@ If a user edits fields they are not allowed to change, save is blocked and an er
 
 Uploading files to SFTP is handled by the following rules:
 
-- Files can only be uploaded into album folders, not into the root folder.
+- Files can only be uploaded into album folders under `/albums/<name>/`, not into the root folder or the `/albums/` listing itself.
 - Upload a **new file**
   - → a **new asset** is created in Immich and **added to that album**
 - Upload a file that **already exists** in Immich
@@ -85,7 +96,7 @@ Delete items from your SFTP/FTP client:
 - **Delete a file**:
   - if the asset is **only in this album** → it is moved to the **Immich trash**
   - if the asset is also in **other albums** → it is **removed from this album only**
-- **Delete an album folder** → the **album is deleted** in Immich  
+- **Delete an album folder** (`/albums/<name>`) → the **album is deleted** in Immich  
   > ⚠️ Important: Your SFTP client usually deletes all files inside a folder as well, so assets are also removed according to the rules above. If you could prevent the client from doing so, only the album would be removed, but the assets would not go to the trash.
 
 ### Downloads 
@@ -261,8 +272,9 @@ WebDAV is natively supported by Windows (Map Network Drive → `http://…`), ma
 ## Known limitations 🧩
 
 - **Renaming files is not possible.** The `originalFileName` in Immich metadata can’t be changed. Because of that, it’s impossible to rename a file via SFTP.
+- **Albums are exposed under `/albums/`** — SFTP clients configured for the old root-level album layout need to update their paths to `/albums/<name>/`.
 - **Albums are not available** on SFTP when:
   - they contain characters that are invalid for a filename
   - the same album name is used multiple times
 - If an album contains multiple assets with the **same original filename**, SFTP clients may not handle it well. Technically this is possible in Immich — try to prevent it.
-- You can’t create subfolders, because nested albums are not possible in Immich.
+- You can’t create subfolders inside an album, because nested albums are not possible in Immich.

@@ -34,6 +34,7 @@ import {
 } from './immich-album-virtual-file-service';
 
 const DEFAULT_ASSET_BASE_NAME = 'asset';
+const ALBUMS_FOLDER_NAME = 'albums';
 const TAGS_FOLDER_NAME = 'tags';
 const PEOPLE_FOLDER_NAME = 'people';
 const TAG_METADATA_FILE_NAME = 'tag.yaml';
@@ -196,20 +197,18 @@ export class ImmichFileSystem implements VirtualFileSystem {
     async listFiles(currentDir: string): Promise<Array<{ name: string; isDir: boolean; size: number; mtime: number }>> {
         try {
             if (currentDir == "/") {
-
-                //Get all albums from Immich API
-                this.albumsCache = await this.fetchAlbums();
                 const visibility = await this.getCollectionVisibility();
 
-                //Map albums to the expected format
-                const rootEntries = this.albumsCache.map((album) => ({
-                    name: album.albumName,
-                    isDir: true,
-                    size: 0,
-                    mtime: getAlbumMtime(album),
-                }));
-
                 const now = Math.floor(Date.now() / 1000);
+                const rootEntries: Array<{ name: string; isDir: boolean; size: number; mtime: number }> = [
+                    {
+                        name: ALBUMS_FOLDER_NAME,
+                        isDir: true,
+                        size: 0,
+                        mtime: now,
+                    },
+                ];
+
                 if (visibility.tagsEnabled) {
                     rootEntries.push({
                         name: TAGS_FOLDER_NAME,
@@ -227,6 +226,50 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     });
                 }
                 return rootEntries;
+            }
+
+            if (this.isAlbumsPath(currentDir)) {
+                const pathInfo = this.extractAlbumPathInfo(currentDir);
+
+                if (!pathInfo.albumName) {
+                    // Listing /albums — return list of albums
+                    this.albumsCache = await this.fetchAlbums();
+                    return this.albumsCache.map((album) => ({
+                        name: album.albumName,
+                        isDir: true,
+                        size: 0,
+                        mtime: getAlbumMtime(album),
+                    }));
+                }
+
+                // Listing /albums/<name> — return album contents
+                const album = await this.getAlbumFromCache(currentDir, false);
+                await this.fetchAssetsForAlbum(album);
+
+                const files = (album.assets ?? []).map((asset) => ({
+                    name: this.getAssetDisplayName(asset, album),
+                    isDir: false,
+                    size: asset.fileSizeInByte,
+                    mtime: this.getAssetMtime(asset),
+                }));
+
+                const metadataContent = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
+                const linkContent = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
+
+                files.push({
+                    name: ALBUM_METADATA_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(metadataContent, 'utf8'),
+                    mtime: getAlbumMtime(album),
+                });
+                files.push({
+                    name: ALBUM_BROWSER_LINK_FILE_NAME,
+                    isDir: false,
+                    size: Buffer.byteLength(linkContent, 'utf8'),
+                    mtime: getAlbumMtime(album),
+                });
+
+                return files;
             }
 
             if (await this.isTagsPath(currentDir)) {
@@ -299,36 +342,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return files;
             }
 
-            // Get album and fetch assets
-            const album = await this.getAlbumFromCache(currentDir, false);
-            await this.fetchAssetsForAlbum(album);
-
-            // Map assets to the expected format
-            const files = (album.assets ?? []).map((asset) => ({
-                name: this.getAssetDisplayName(asset, album),
-                isDir: false,
-                size: asset.fileSizeInByte,
-                mtime: this.getAssetMtime(asset),
-            }));
-
-            // Add virtual album metadata/link files
-            const metadataContent = buildAlbumMetadataYamlForAlbum(album, this.currentUser, this.baseUrl);
-            const linkContent = buildAlbumBrowserLinkForAlbum(album, this.baseUrl);
-
-            files.push({
-                name: ALBUM_METADATA_FILE_NAME,
-                isDir: false,
-                size: Buffer.byteLength(metadataContent, 'utf8'),
-                mtime: getAlbumMtime(album),
-            });
-            files.push({
-                name: ALBUM_BROWSER_LINK_FILE_NAME,
-                isDir: false,
-                size: Buffer.byteLength(linkContent, 'utf8'),
-                mtime: getAlbumMtime(album),
-            });
-
-            return files;
+            // No matching path found
+            throw new Error(`Unknown path: ${currentDir}`);
         }
         catch (error) {
             console.error("Error fetching albums:", error);
@@ -528,22 +543,32 @@ export class ImmichFileSystem implements VirtualFileSystem {
             };
         }
 
-        // Determine if the path is a directory (album) or a file (asset)
-        const pathInfo = this.extractPathInfo(filename);
+        if (this.isAlbumsPath(filename)) {
+            const pathInfo = this.extractAlbumPathInfo(filename);
 
-        if (pathInfo.fileName === null) {
-            // It's a directory (album)
-            const album = await this.getAlbumOrNullFromCache(filename, true);
-            if (album) {
+            if (!pathInfo.albumName) {
+                // /albums root folder
                 return {
                     isDir: true,
-                    size: 0,    // Albums don't have a size
+                    size: 0,
+                    mtime: Math.floor(Date.now() / 1000),
+                };
+            }
+
+            if (!pathInfo.fileName) {
+                // /albums/<name>
+                const album = await this.getAlbumOrNullFromCache(filename, true);
+                if (!album) {
+                    return null;
+                }
+                return {
+                    isDir: true,
+                    size: 0,
                     mtime: getAlbumMtime(album),
                 };
             }
-            return null; // Album not found
 
-        } else {
+            // /albums/<name>/<file>
             if (this.isVirtualAlbumFile(filename)) {
                 const album = await this.getAlbumOrNullFromCache(filename, true);
                 if (!album) {
@@ -567,7 +592,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 };
             }
 
-            // It's a file (asset)
             const asset = await this.getAssetOrNullFromCache(filename, true);
             if (asset) {
                 return {
@@ -576,9 +600,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     mtime: this.getAssetMtime(asset),
                 };
             }
-            // Asset not found
             return null;
         }
+
+        return null;
     }
     async rename(oldName: string, newName: string): Promise<void> {
         if (this.isVirtualAlbumFile(oldName) || this.isVirtualAlbumFile(newName)) {
@@ -595,45 +620,44 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return;
         }
 
-        // Check if the file exists in the upload queue
+        // Check if the file exists in the upload queue (in-flight upload rename)
         const fileIndex = this.uploadQueue.findIndex(f => f.filename === oldName);
-
-        //rename
         if (fileIndex !== -1) {
             this.uploadQueue[fileIndex].filename = newName;
-            return; // Renaming in the upload queue is successful
+            return;
         }
 
-        // Detect album folder rename: both paths must be top-level directories (no filename segment)
-        let oldPathInfo: { albumName: string; fileName: string | null } | null = null;
-        let newPathInfo: { albumName: string; fileName: string | null } | null = null;
-        try {
-            oldPathInfo = this.extractPathInfo(oldName);
-            newPathInfo = this.extractPathInfo(newName);
-        } catch {
-            // Path has too many segments — not an album-level rename
-        }
+        // Detect album folder rename: /albums/OldName → /albums/NewName
+        if (this.isAlbumsPath(oldName) || this.isAlbumsPath(newName)) {
+            const oldPathInfo = this.extractAlbumPathInfo(oldName);
+            const newPathInfo = this.extractAlbumPathInfo(newName);
 
-        if (oldPathInfo?.fileName === null && newPathInfo?.fileName === null) {
-            const album = await this.getAlbumOrNullFromCache(oldName, true);
-            if (album) {
-                const newAlbumName = newPathInfo.albumName;
-                if (!isValidFilename(newAlbumName)) {
-                    throw new Error(`Invalid album name: '${newAlbumName}'.`);
-                }
-
-                await this.immichRequest({
-                    method: 'PATCH',
-                    endpoint: `albums/${album.id}`,
-                    data: JSON.stringify({ albumName: newAlbumName }),
-                    logAction: 'Rename album',
-                });
-                this.albumsCache = await this.fetchAlbums();
-                return;
+            const isAlbumFolderRename = oldPathInfo.albumName && !oldPathInfo.fileName
+                && newPathInfo.albumName && !newPathInfo.fileName;
+            if (!isAlbumFolderRename) {
+                throw new Error(`'${ALBUMS_FOLDER_NAME}' is read-only except for renaming album folders.`);
             }
+
+            const newAlbumName = newPathInfo.albumName as string;
+            if (!isValidFilename(newAlbumName)) {
+                throw new Error(`Invalid album name: '${newAlbumName}'.`);
+            }
+
+            const album = await this.getAlbumOrNullFromCache(oldName, true);
+            if (!album) {
+                throw new Error(`Album not found: '${oldPathInfo.albumName}'.`);
+            }
+
+            await this.immichRequest({
+                method: 'PATCH',
+                endpoint: `albums/${album.id}`,
+                data: JSON.stringify({ albumName: newAlbumName }),
+                logAction: 'Rename album',
+            });
+            this.albumsCache = await this.fetchAlbums();
+            return;
         }
 
-        //File not found
         throw new Error("Rename not support for Immich backend. Expect for tmp files (files that have been upload with OPEN, WRITE, CLOSE, but not jet sent to Immich in SETSTAT).");
     }
     async remove(filename: string): Promise<void> {
@@ -641,57 +665,60 @@ export class ImmichFileSystem implements VirtualFileSystem {
             throw new Error(`'${filename}' is read-only.`);
         }
 
-        // Check if the path is a file, not a directory
-        const pathInfo = this.extractPathInfo(filename);
+        if (!this.isAlbumsPath(filename)) {
+            throw new Error(`'${filename}' cannot be removed.`);
+        }
 
-        //Check if it is an album
-        if (pathInfo.albumName != null && pathInfo.fileName == null) {
+        const pathInfo = this.extractAlbumPathInfo(filename);
+
+        if (!pathInfo.albumName) {
+            throw new Error(`The '${ALBUMS_FOLDER_NAME}' folder itself cannot be removed.`);
+        }
+
+        if (!pathInfo.fileName) {
+            // Delete album
             const album = await this.getAlbumFromCache(filename, false);
             await this.fetchAssetsForAlbum(album);
 
-            //Delete all assets in the album
             for (const asset of album.assets ?? []) {
                 await this.deleteAsset(album, asset);
             }
 
-            // Delete the album itself
             await this.immichRequest({
                 method: 'DELETE',
                 endpoint: `albums/${album.id}`,
                 logAction: 'Delete album'
             });
-
+            return;
         }
 
-        // Check if the path is a file (asset)
-        if (pathInfo.albumName != null && pathInfo.fileName != null) {
-            if (this.isVirtualAlbumFile(filename)) {
-                throw new Error('Virtual album files cannot be deleted.');
-            }
-
-            // Get the album and asset from the cache
-            const album = await this.getAlbumFromCache(filename, false);
-            const asset = await this.getAssetFromCache(filename, false);
-
-            await this.deleteAsset(album, asset);
+        // Delete asset
+        if (this.isVirtualAlbumFile(filename)) {
+            throw new Error('Virtual album files cannot be deleted.');
         }
+
+        const album = await this.getAlbumFromCache(filename, false);
+        const asset = await this.getAssetFromCache(filename, false);
+        await this.deleteAsset(album, asset);
     }
-    async mkdir(path: string): Promise<void> {
-        if (await this.isReadOnlyCollectionPath(path)) {
-            throw new Error(`'${path}' is read-only.`);
+    async mkdir(dirPath: string): Promise<void> {
+        if (await this.isReadOnlyCollectionPath(dirPath)) {
+            throw new Error(`'${dirPath}' is read-only.`);
         }
 
-        // Only allow creation of folders at level 1 (e.g., "/MyAlbum")
-        const cleanedPath = path.replace(/^\/+|\/+$/g, ""); // Remove leading and trailing slashes
-        if (cleanedPath.includes("/")) {
-            throw new Error("Only top-level folders (albums) can be created.");
+        if (!this.isAlbumsPath(dirPath)) {
+            throw new Error("New folders can only be created inside '/albums'.");
         }
 
-        // Create a new album in Immich
+        const pathInfo = this.extractAlbumPathInfo(dirPath);
+        if (!pathInfo.albumName || pathInfo.fileName !== null) {
+            throw new Error("Only album-level folders can be created (e.g. '/albums/MyAlbum').");
+        }
+
         await this.immichRequest({
             method: 'POST',
             endpoint: 'albums',
-            data: JSON.stringify({ albumName: cleanedPath }),
+            data: JSON.stringify({ albumName: pathInfo.albumName }),
             logAction: 'Create album'
         });
     }
@@ -1202,8 +1229,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
             this.albumsCache = await this.fetchAlbums();
         }
 
-        // Find the album based on the current directory
-        const folderName = this.extractPathInfo(filename).albumName;
+        // Extract album name from either /albums/<name>/... or legacy /<name>/...
+        let folderName: string;
+        try {
+            folderName = this.extractAlbumNameFromPath(filename);
+        } catch {
+            return null;
+        }
         return this.albumsCache.find(a => a.albumName === folderName) || null;
     }
     private async getAssetFromCache(filename: string, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
@@ -1224,7 +1256,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Find the asset in the album based on the configured visible file name
-        const assetFileName = this.extractPathInfo(filename).fileName;
+        const assetFileName = this.extractAssetFileNameFromPath(filename);
         if (!assetFileName || !album.assets) {
             return null;
         }
@@ -1261,18 +1293,49 @@ export class ImmichFileSystem implements VirtualFileSystem {
         });
     }
 
+    private isAlbumsPath(filePath: string): boolean {
+        return this.pathStartsWithFolder(filePath, ALBUMS_FOLDER_NAME);
+    }
+
+    private extractAlbumPathInfo(filePath: string): { albumName: string | null; fileName: string | null } {
+        const parts = this.getPathParts(filePath);
+        if (parts[0] !== ALBUMS_FOLDER_NAME) {
+            throw new Error(`Path '${filePath}' is not in '${ALBUMS_FOLDER_NAME}'.`);
+        }
+        if (parts.length === 1) return { albumName: null, fileName: null };
+        if (parts.length === 2) return { albumName: parts[1], fileName: null };
+        if (parts.length === 3) return { albumName: parts[1], fileName: parts[2] };
+        throw new Error(`Invalid album path '${filePath}'.`);
+    }
+
+    private extractAlbumNameFromPath(filePath: string): string {
+        if (this.isAlbumsPath(filePath)) {
+            const albumName = this.extractAlbumPathInfo(filePath).albumName;
+            if (!albumName) {
+                throw new Error(`Path '${filePath}' does not contain an album name.`);
+            }
+            return albumName;
+        }
+        return this.extractPathInfo(filePath).albumName;
+    }
+
+    private extractAssetFileNameFromPath(filePath: string): string | null {
+        if (this.isAlbumsPath(filePath)) {
+            return this.extractAlbumPathInfo(filePath).fileName;
+        }
+        return this.extractPathInfo(filePath).fileName;
+    }
+
     private isAlbumMetadataFilePath(filePath: string): boolean {
         try {
-            const pathInfo = this.extractPathInfo(filePath);
-            return isAlbumMetadataFileName(pathInfo.fileName);
+            return isAlbumMetadataFileName(this.extractAssetFileNameFromPath(filePath));
         } catch {
             return false;
         }
     }
     private isAlbumBrowserLinkFilePath(filePath: string): boolean {
         try {
-            const pathInfo = this.extractPathInfo(filePath);
-            return isAlbumBrowserLinkFileName(pathInfo.fileName);
+            return isAlbumBrowserLinkFileName(this.extractAssetFileNameFromPath(filePath));
         } catch {
             return false;
         }
