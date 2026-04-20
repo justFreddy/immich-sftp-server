@@ -97,6 +97,32 @@ function getOptionalNestedString(source: Record<string, unknown>, path: string[]
   return normalized === '' ? undefined : normalized;
 }
 
+function getOptionalNestedBoolean(source: Record<string, unknown>, path: string[]): boolean | undefined {
+  let current: unknown = source;
+  for (const part of path) {
+    if (typeof current !== 'object' || current === null || Array.isArray(current) || !(part in current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  if (typeof current === 'boolean') {
+    return current;
+  }
+  if (typeof current !== 'string') {
+    return undefined;
+  }
+
+  const normalized = current.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
+
 function loadYamlSettingsFile(): Record<string, unknown> {
   const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-network-storage.yaml');
   if (!fs.existsSync(settingsFilePath)) {
@@ -176,6 +202,8 @@ export const config = (() => {
   );
   const envFileNamePattern = parseAssetFileNamePattern(getOptionalEnv('ASSET_FILENAME_PATTERN'), 'environment variable ASSET_FILENAME_PATTERN');
   const envDownloadSource = parseAssetDownloadSource(getOptionalEnv('ASSET_DOWNLOAD_SOURCE'), 'environment variable ASSET_DOWNLOAD_SOURCE');
+  const yamlEnableTagsFolderDefault = getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'tags', 'enabledDefault']);
+  const yamlEnablePeopleFolderDefault = getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'people', 'enabledDefault']);
 
   return {
     immichHost: requireEnv('IMMICH_HOST'),
@@ -194,5 +222,7 @@ export const config = (() => {
     webdavPort: getEnvNumber('WEBDAV_PORT', 1900),
     assetFileNamePattern: envFileNamePattern ?? yamlFileNamePattern ?? 'original',
     assetDownloadSource: envDownloadSource ?? yamlDownloadSource ?? 'original',
+    enableTagsFolderDefault: getEnvBoolean('ENABLE_TAGS_FOLDER_DEFAULT', yamlEnableTagsFolderDefault ?? true),
+    enablePeopleFolderDefault: getEnvBoolean('ENABLE_PEOPLE_FOLDER_DEFAULT', yamlEnablePeopleFolderDefault ?? true),
   };
 })();

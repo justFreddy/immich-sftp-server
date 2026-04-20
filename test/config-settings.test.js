@@ -15,7 +15,9 @@ process.stdout.write(JSON.stringify({
   enableWebdav: config.enableWebdav,
   webdavPort: config.webdavPort,
   assetFileNamePattern: config.assetFileNamePattern,
-  assetDownloadSource: config.assetDownloadSource
+  assetDownloadSource: config.assetDownloadSource,
+  enableTagsFolderDefault: config.enableTagsFolderDefault,
+  enablePeopleFolderDefault: config.enablePeopleFolderDefault
 }));
 `;
   const output = execFileSync(process.execPath, ['-e', script], {
@@ -44,6 +46,8 @@ test('asset settings can be read from root YAML file', (t) => {
     webdavPort: 1900,
     assetFileNamePattern: 'shortUuid',
     assetDownloadSource: 'preview',
+    enableTagsFolderDefault: true,
+    enablePeopleFolderDefault: true,
   });
 });
 
@@ -61,6 +65,8 @@ test('environment variables override YAML asset settings', (t) => {
     ENABLE_SMB: 'true',
     ENABLE_WEBDAV: '1',
     WEBDAV_PORT: '8080',
+    ENABLE_TAGS_FOLDER_DEFAULT: 'false',
+    ENABLE_PEOPLE_FOLDER_DEFAULT: '0',
   }, tmpDir);
 
   assert.deepEqual(config, {
@@ -69,5 +75,29 @@ test('environment variables override YAML asset settings', (t) => {
     webdavPort: 8080,
     assetFileNamePattern: 'dateUuid',
     assetDownloadSource: 'preview',
+    enableTagsFolderDefault: false,
+    enablePeopleFolderDefault: false,
+  });
+});
+
+test('virtual folder defaults can be read from root YAML file', (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `virtualFolders:
+  tags:
+    enabledDefault: false
+  people:
+    enabledDefault: true
+`);
+
+  const config = readConfig({}, tmpDir);
+  assert.deepEqual(config, {
+    enableSmb: false,
+    enableWebdav: false,
+    webdavPort: 1900,
+    assetFileNamePattern: 'original',
+    assetDownloadSource: 'original',
+    enableTagsFolderDefault: false,
+    enablePeopleFolderDefault: true,
   });
 });
