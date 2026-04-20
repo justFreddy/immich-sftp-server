@@ -6,7 +6,6 @@ import tmp from 'tmp';
 import { VirtualFileSystem } from './virtual-file-system';
 import { JsonFileSystem } from './json-file-system';
 import { ImmichFileSystem } from './immich-file-system';
-import { ensureHostKeySync } from "./ensure-host-key";
 import { config } from './config';
 import { TransferProtocolServer } from './transfer-protocol-server';
 
@@ -24,8 +23,12 @@ interface ImmichSftpConnection extends Connection {
   fsBackend?: VirtualFileSystem;
 }
 
-//Generate host key if not exists
-const hostKey = ensureHostKeySync(config.hostKeyDir);
+function createEphemeralHostKeySync(): Buffer {
+  const { privateKey } = crypto.generateKeyPairSync('ed25519');
+  return privateKey.export({ format: 'pem', type: 'pkcs8' }) as Buffer;
+}
+
+const hostKey = createEphemeralHostKeySync();
 
 //Create the SFT Server
 const server = new Server({

@@ -4,7 +4,6 @@ const http = require('node:http');
 const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 
@@ -22,8 +21,7 @@ test('FTP and SFTP CLI login accepts email and plus-address usernames', async (t
   const mock = await startMockImmichServer();
   const sftpPort = await getFreePort();
   const ftpPort = await getFreePort();
-  const hostKeyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-sftp-hostkey-'));
-  const serverProcess = await startTransferServer(mock.baseUrl, sftpPort, ftpPort, hostKeyDir);
+  const serverProcess = await startTransferServer(mock.baseUrl, sftpPort, ftpPort);
 
   t.after(async () => {
     if (serverProcess.exitCode == null) {
@@ -31,7 +29,6 @@ test('FTP and SFTP CLI login accepts email and plus-address usernames', async (t
       await waitForExitOrTimeout(serverProcess, 5_000);
     }
     await mock.close();
-    fs.rmSync(hostKeyDir, { recursive: true, force: true });
   });
 
   for (const username of USERNAMES) {
@@ -133,7 +130,7 @@ async function startMockImmichServer() {
   };
 }
 
-async function startTransferServer(immichHost, sftpPort, ftpPort, hostKeyDir) {
+async function startTransferServer(immichHost, sftpPort, ftpPort) {
   const child = spawn('node', ['dist/server.js'], {
     cwd: REPO_ROOT,
     env: {
@@ -145,7 +142,6 @@ async function startTransferServer(immichHost, sftpPort, ftpPort, hostKeyDir) {
       SFTP_PORT: String(sftpPort),
       FTP_PORT: String(ftpPort),
       LISTEN_HOST: '127.0.0.1',
-      HOST_KEY_DIR: hostKeyDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

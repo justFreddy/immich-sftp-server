@@ -79,15 +79,6 @@ function getOptionalEnvNumber(name: string): number | undefined {
   return parsed;
 }
 
-function isRunningInDocker(): boolean {
-  // häufigster Indikator
-  try {
-    if (fs.existsSync("/.dockerenv")) return true;
-  } catch {}
-
-  return false;
-}
-
 function getOptionalNestedString(source: Record<string, unknown>, path: string[]): string | undefined {
   let current: unknown = source;
   for (const part of path) {
@@ -258,7 +249,6 @@ export const config = (() => {
   return {
     immichHost: requireEnv('IMMICH_HOST'),
     TZ: getEnvOrDefault('TZ', 'UTC'),
-    hostKeyDir: getEnvOrDefault('HOST_KEY_DIR', isRunningInDocker() ? '/data/ssh-host-key' : './data/ssh-host-key'),
     listenHost: getEnvOrDefault('LISTEN_HOST', '0.0.0.0'),
     sftpPort: getEnvNumber('SFTP_PORT', 22),
     ftpPort: getEnvNumber('FTP_PORT', 21),
@@ -267,7 +257,6 @@ export const config = (() => {
     ftpPassivePortMax,
     enableSftp: getEnvBoolean('ENABLE_SFTP', true),
     enableFtp: getEnvBoolean('ENABLE_FTP', false),
-    enableSmb: getEnvBoolean('ENABLE_SMB', false),
     enableWebdav: getEnvBoolean('ENABLE_WEBDAV', false),
     webdavPort: getEnvNumber('WEBDAV_PORT', 1900),
     assetFileNamePattern: envFileNamePattern ?? yamlOverrides.assetFileNamePattern ?? 'original',
