@@ -121,7 +121,7 @@ test('virtual folder defaults can be read from root YAML file', (t) => {
   assert.deepEqual(config, {
     enableWebdav: false,
     webdavPort: 1900,
-    assetFileNamePattern: 'original',
+    assetFileNamePattern: 'dateOriginalShortUuid',
     assetDownloadSource: 'original',
     enableTagsFolderDefault: false,
     enablePeopleFolderDefault: true,
@@ -161,7 +161,7 @@ virtualFolders:
 
   const otherUserSettings = readUserSettings('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {}, tmpDir);
   assert.deepEqual(otherUserSettings, {
-    assetFileNamePattern: 'original',
+    assetFileNamePattern: 'dateOriginalShortUuid',
     assetDownloadSource: 'original',
     enableTagsFolderDefault: true,
     enablePeopleFolderDefault: true,
@@ -229,6 +229,20 @@ virtualFolders:
     enableTagsFolderDefault: false,
     enablePeopleFolderDefault: true,
   });
+});
+
+test('date_original_short_uuid pattern is accepted from YAML and env', (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(tmpDir, 'config.yaml'), `asset:
+  fileNamePattern: date_original_short_uuid
+`);
+
+  const yamlConfig = readConfig({}, tmpDir);
+  assert.equal(yamlConfig.assetFileNamePattern, 'dateOriginalShortUuid');
+
+  const envConfig = readConfig({ ASSET_FILENAME_PATTERN: 'timestamp_original_short_uuid' }, tmpDir);
+  assert.equal(envConfig.assetFileNamePattern, 'dateOriginalShortUuid');
 });
 
 test('ensureSettingsFileForUser scopes non-UUID users to their own file', (t) => {

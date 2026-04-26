@@ -1558,6 +1558,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (Buffer.isBuffer(data)) {
             return '[Binary Data]'; // Mask the binary data as '[Binary Data]'
         }
+        if (data instanceof Readable) {
+            return '[Stream]';
+        }
         if (data instanceof Blob) {
             return '[Blob]';  // For browsers, you can handle Blobs
         }
@@ -1660,6 +1663,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return `${formattedTimestamp}${extension}`;
             case 'dateUuid':
                 return `${formattedTimestamp}_${shortId}${extension}`;
+            case 'dateOriginalShortUuid': {
+                const originalBaseName = path.parse(asset.originalFileName).name || DEFAULT_ASSET_BASE_NAME;
+                return `${formattedTimestamp}_${originalBaseName}_${shortId}${extension}`;
+            }
             case 'original':
             default:
                 return asset.originalFileName;

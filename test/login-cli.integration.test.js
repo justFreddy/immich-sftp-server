@@ -44,6 +44,37 @@ test('FTP and SFTP CLI login accepts email and plus-address usernames', async (t
   ]);
 });
 
+test('FTP active mode can download album assets', async (t) => {
+  if (!commandExists('ftp')) {
+    t.skip('Requires ftp CLI tool.');
+    return;
+  }
+
+  const mock = await startMockImmichServerWithAsset();
+  const sftpPort = await getFreePort();
+  const ftpPort = await getFreePort();
+  const serverProcess = await startTransferServer(mock.baseUrl, sftpPort, ftpPort);
+  const outputPath = path.join(osTmpDir(), `immich-ns-active-download-${process.pid}.txt`);
+
+  t.after(async () => {
+    try {
+      fs.rmSync(outputPath, { force: true });
+    } catch {}
+    if (serverProcess.exitCode == null) {
+      serverProcess.kill('SIGTERM');
+      await waitForExitOrTimeout(serverProcess, 5_000);
+    }
+    await mock.close();
+  });
+
+  const script = `open 127.0.0.1 ${ftpPort}\nuser ${USERNAMES[0]} ${PASSWORD}\npassive\nbinary\ncd albums/Test\nget x.txt ${outputPath}\nbye\n`;
+  await runCommand('ftp', ['-inv'], script, 20_000);
+
+  assert.equal(fs.existsSync(outputPath), true);
+  const content = fs.readFileSync(outputPath, 'utf8');
+  assert.equal(content, 'hello world');
+});
+
 function commandExists(command) {
   return spawnSync('sh', ['-c', `command -v ${command}`], { stdio: 'ignore' }).status === 0;
 }
@@ -128,6 +159,107 @@ async function startMockImmichServer() {
       });
     },
   };
+}
+
+async function startMockImmichServerWithAsset() {
+  const loginEmails = [];
+
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf8');
+      const payload = body ? JSON.parse(body) : {};
+
+      if (req.method === 'POST' && req.url === '/api/auth/login') {
+        loginEmails.push(String(payload.email ?? ''));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          accessToken: 'mock-access-token',
+          user: {
+            id: 'mock-user-id',
+            email: payload.email,
+            username: payload.email,
+          },
+        }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/api/auth/logout') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/api/users/me/preferences') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return;
+      }
+
+      if (req.method === 'GET' && (req.url === '/api/albums' || req.url === '/api/albums?shared=true')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([{ id: 'album-1', albumName: 'Test', description: '' }]));
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/api/albums/album-1') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 'album-1',
+          albumName: 'Test',
+          description: '',
+          assets: [{
+            id: 'asset-1',
+            originalFileName: 'x.txt',
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+            fileCreatedAt: '2025-01-01T00:00:00.000Z',
+            fileModifiedAt: '2025-01-01T00:00:00.000Z',
+            isTrashed: false,
+            exifInfo: { fileSizeInByte: 11 },
+          }],
+        }));
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/api/assets/asset-1/original') {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end('hello world');
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: 'Not found' }));
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
+  const port = getListeningPort(server.address());
+
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    loginEmails,
+    close: async () => {
+      await new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
+  };
+}
+
+function osTmpDir() {
+  return require('node:os').tmpdir();
 }
 
 async function startTransferServer(immichHost, sftpPort, ftpPort) {

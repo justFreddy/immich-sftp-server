@@ -104,7 +104,7 @@ services:
 | `ENABLE_WEBDAV` | `false` | Enable WebDAV. |
 | `FTP_PASSIVE_HOST` | *(unset)* | Host/IP returned to FTP clients in passive mode. |
 | `FTP_PASSIVE_PORT_MIN/MAX` | *(unset)* | Passive FTP port range. |
-| `ASSET_FILENAME_PATTERN` | `original` | `original`, `uuid`, `short_uuid`, `date`, `date_uuid`, ... |
+| `ASSET_FILENAME_PATTERN` | `date_original_short_uuid` | `original`, `uuid`, `short_uuid`, `date`, `date_uuid`, `date_original_short_uuid` |
 | `ASSET_DOWNLOAD_SOURCE` | `original` | `original` or `preview` (`thumbnail` alias accepted). |
 | `ENABLE_TAGS_FOLDER_DEFAULT` | `true` | Fallback if user preference can’t be read. |
 | `ENABLE_PEOPLE_FOLDER_DEFAULT` | `true` | Fallback if user preference can’t be read. |

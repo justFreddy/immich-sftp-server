@@ -1,5 +1,5 @@
 asset:
-  fileNamePattern: original
+  fileNamePattern: date_original_short_uuid
   downloadSource: original
 virtualFolders:
   tags:

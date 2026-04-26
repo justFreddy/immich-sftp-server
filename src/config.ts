@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import YAML from 'yaml';
 
-export type AssetFileNamePattern = 'original' | 'assetUuid' | 'shortUuid' | 'date' | 'dateUuid';
+export type AssetFileNamePattern = 'original' | 'assetUuid' | 'shortUuid' | 'date' | 'dateUuid' | 'dateOriginalShortUuid';
 export type AssetDownloadSource = 'original' | 'preview';
 export type UserScopedSettings = {
   assetFileNamePattern: AssetFileNamePattern;
@@ -293,10 +293,14 @@ function parseAssetFileNamePattern(value: string | undefined, source: string): A
     date: 'date',
     date_uuid: 'dateUuid',
     dateuuid: 'dateUuid',
+    date_original_short_uuid: 'dateOriginalShortUuid',
+    dateoriginalshortuuid: 'dateOriginalShortUuid',
+    timestamp_original_short_uuid: 'dateOriginalShortUuid',
+    timestamporiginalshortuuid: 'dateOriginalShortUuid',
   };
   const parsed = byValue[normalized];
   if (!parsed) {
-    throw new Error(`Invalid asset file name pattern from ${source}: ${value}. Allowed: original, assetUuid, shortUuid, date, dateUuid.`);
+    throw new Error(`Invalid asset file name pattern from ${source}: ${value}. Allowed: original, assetUuid, shortUuid, date, dateUuid, dateOriginalShortUuid.`);
   }
   return parsed;
 }
@@ -347,7 +351,7 @@ export const config = (() => {
     enableFtp: getEnvBoolean('ENABLE_FTP', false),
     enableWebdav: getEnvBoolean('ENABLE_WEBDAV', false),
     webdavPort: getEnvNumber('WEBDAV_PORT', 1900),
-    assetFileNamePattern: envFileNamePattern ?? yamlOverrides.assetFileNamePattern ?? 'original',
+    assetFileNamePattern: envFileNamePattern ?? yamlOverrides.assetFileNamePattern ?? 'dateOriginalShortUuid',
     assetDownloadSource: envDownloadSource ?? yamlOverrides.assetDownloadSource ?? 'original',
     enableTagsFolderDefault: getEnvBoolean('ENABLE_TAGS_FOLDER_DEFAULT', yamlOverrides.enableTagsFolderDefault ?? true),
     enablePeopleFolderDefault: getEnvBoolean('ENABLE_PEOPLE_FOLDER_DEFAULT', yamlOverrides.enablePeopleFolderDefault ?? true),
