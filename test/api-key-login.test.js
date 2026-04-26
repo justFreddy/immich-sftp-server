@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const os = require('node:os');
 const path = require('node:path');
 
 const immichFileSystemModulePath = path.resolve(__dirname, '..', 'dist', 'immich-file-system.js');
@@ -95,6 +96,7 @@ const { ImmichFileSystem } = require(${JSON.stringify(immichFileSystemModulePath
       TZ: 'UTC',
       ENABLE_SFTP: 'false',
       ENABLE_FTP: 'false',
+      SETTINGS_FILE: path.join(os.tmpdir(), `immich-ns-api-key-${process.pid}.yaml`),
     },
   });
 }

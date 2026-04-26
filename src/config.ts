@@ -175,10 +175,11 @@ function parseUserScopedSettingsOverrides(yamlSettings: Record<string, unknown>)
 function resolveSettingsFilePath(userId?: string): string | undefined {
   const settingsFilePath = getConfiguredSettingsFilePath();
   const candidates: string[] = [];
-  const normalizedUserId = userId?.trim();
+  const normalizedUserId: string | undefined = userId?.trim();
   if (isUuid(normalizedUserId)) {
-    candidates.push(getUserScopedSettingsTargetPath(settingsFilePath, normalizedUserId));
-    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, normalizedUserId));
+    const scopedUserId = normalizedUserId;
+    candidates.push(getUserScopedSettingsTargetPath(settingsFilePath, scopedUserId));
+    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, scopedUserId));
   }
   candidates.push(settingsFilePath);
 

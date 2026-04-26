@@ -1426,7 +1426,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
     private getCurrentUserId(): string | undefined {
         const userId = this.getTrimmedString(this.currentUser?.id);
-        return userId || undefined;
+        return userId === '' ? undefined : userId;
     }
 
     private ensureCurrentUserSettingsFile(): string {
