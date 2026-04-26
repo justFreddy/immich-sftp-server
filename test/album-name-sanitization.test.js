@@ -3,11 +3,23 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const os = require('node:os');
 const path = require('node:path');
 
 const immichFileSystemModulePath = path.resolve(__dirname, '..', 'dist', 'immich-file-system.js');
 const yamlModulePath = path.resolve(__dirname, '..', 'node_modules', 'yaml');
 const execFileAsync = promisify(execFile);
+
+function buildImmichSessionEnv(immichHost) {
+  return {
+    ...process.env,
+    IMMICH_HOST: immichHost,
+    TZ: 'UTC',
+    ENABLE_SFTP: 'false',
+    ENABLE_FTP: 'false',
+    SETTINGS_FILE: path.join(os.tmpdir(), `immich-ns-album-tests-${process.pid}.yaml`),
+  };
+}
 
 test('albums with symbols in their names are sanitized and returned as folder names', async () => {
   const albums = [
@@ -200,13 +212,7 @@ console.error = (...args) => process.stderr.write(args.join(' ') + '\\n');
 `;
 
   const output = await execFileAsync(process.execPath, ['-e', script], {
-    env: {
-      ...process.env,
-      IMMICH_HOST: immichHost,
-      TZ: 'UTC',
-      ENABLE_SFTP: 'false',
-      ENABLE_FTP: 'false',
-    },
+    env: buildImmichSessionEnv(immichHost),
   });
   return JSON.parse(output.stdout);
 }
@@ -229,13 +235,7 @@ console.error = (...args) => process.stderr.write(args.join(' ') + '\\n');
 `;
 
   const output = await execFileAsync(process.execPath, ['-e', script], {
-    env: {
-      ...process.env,
-      IMMICH_HOST: immichHost,
-      TZ: 'UTC',
-      ENABLE_SFTP: 'false',
-      ENABLE_FTP: 'false',
-    },
+    env: buildImmichSessionEnv(immichHost),
   });
   return JSON.parse(output.stdout);
 }
@@ -263,13 +263,7 @@ console.error = (...args) => process.stderr.write(args.join(' ') + '\\n');
 `;
 
   await execFileAsync(process.execPath, ['-e', script], {
-    env: {
-      ...process.env,
-      IMMICH_HOST: immichHost,
-      TZ: 'UTC',
-      ENABLE_SFTP: 'false',
-      ENABLE_FTP: 'false',
-    },
+    env: buildImmichSessionEnv(immichHost),
   });
 }
 
@@ -291,13 +285,7 @@ console.error = (...args) => process.stderr.write(args.join(' ') + '\\n');
 `;
 
   await execFileAsync(process.execPath, ['-e', script], {
-    env: {
-      ...process.env,
-      IMMICH_HOST: immichHost,
-      TZ: 'UTC',
-      ENABLE_SFTP: 'false',
-      ENABLE_FTP: 'false',
-    },
+    env: buildImmichSessionEnv(immichHost),
   });
 }
 
@@ -333,13 +321,7 @@ console.error = (...args) => process.stderr.write(args.join(' ') + '\\n');
 `;
 
   await execFileAsync(process.execPath, ['-e', script], {
-    env: {
-      ...process.env,
-      IMMICH_HOST: immichHost,
-      TZ: 'UTC',
-      ENABLE_SFTP: 'false',
-      ENABLE_FTP: 'false',
-    },
+    env: buildImmichSessionEnv(immichHost),
   });
 }
 

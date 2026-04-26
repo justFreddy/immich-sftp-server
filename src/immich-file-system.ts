@@ -2,7 +2,14 @@ import { VirtualFileSystem } from "./virtual-file-system";
 import axios from 'axios';
 import FormData from 'form-data';
 import crypto from 'crypto';
-import { config, UserScopedSettings, loadSettingsForUser } from './config';
+import {
+    config,
+    UserScopedSettings,
+    ensureSettingsFileForUser,
+    loadSettingsForUser,
+    parseAndMergeUserSettingsContent,
+    saveSettingsForUser
+} from './config';
 import fs from 'fs';
 import tmp from 'tmp';
 import { Readable } from 'stream';
@@ -39,6 +46,7 @@ const TAGS_FOLDER_NAME = 'tags';
 const PEOPLE_FOLDER_NAME = 'people';
 const TAG_METADATA_FILE_NAME = 'tag.yaml';
 const PERSON_METADATA_FILE_NAME = 'person.yaml';
+const ROOT_CONFIG_FILE_NAME = 'config.yaml';
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
@@ -49,6 +57,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private albumsCache: ImmichAlbum[] = [];
     private tagsCache: ImmichTag[] = [];
     private peopleCache: ImmichPerson[] = [];
+    private collectionAssetsCache = new Map<string, ImmichAsset[]>();
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
     private currentUser: ImmichUser | null = null;
     private collectionVisibilityCache: { tagsEnabled: boolean; peopleEnabled: boolean } | null = null;
@@ -103,10 +112,15 @@ export class ImmichFileSystem implements VirtualFileSystem {
         this.collectionVisibilityCache = null;
         this.tagsCache = [];
         this.peopleCache = [];
+        this.collectionAssetsCache.clear();
         this.userScopedSettings = loadSettingsForUser();
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {
+        if (this.isRootConfigFilePath(filename)) {
+            return;
+        }
+
         if (await this.isReadOnlyCollectionPath(filename)) {
             throw new Error(`'${filename}' is read-only.`);
         }
@@ -219,6 +233,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         try {
             if (currentDir == "/") {
                 const visibility = await this.getCollectionVisibility();
+                const rootConfigFile = this.getRootConfigFileEntry();
 
                 const now = Math.floor(Date.now() / 1000);
                 const rootEntries: Array<{ name: string; isDir: boolean; size: number; mtime: number }> = [
@@ -228,6 +243,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                         size: 0,
                         mtime: now,
                     },
+                    rootConfigFile,
                 ];
 
                 if (visibility.tagsEnabled) {
@@ -254,7 +270,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 if (!pathInfo.albumName) {
                     // Listing /albums — return list of albums
-                    this.albumsCache = await this.fetchAlbums();
+                    if (this.albumsCache.length === 0) {
+                        this.albumsCache = await this.fetchAlbums();
+                    }
                     return this.albumsCache.map((album) => ({
                         name: album.displayName ?? album.albumName,
                         isDir: true,
@@ -300,7 +318,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 }
 
                 if (!pathInfo.itemName) {
-                    this.tagsCache = await this.fetchTags();
+                    if (this.tagsCache.length === 0) {
+                        this.tagsCache = await this.fetchTags();
+                    }
                     return this.tagsCache.map((tag) => ({
                         name: tag.displayName,
                         isDir: true,
@@ -309,8 +329,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     }));
                 }
 
-                const tag = await this.getTagFromCache(pathInfo.itemName, true);
-                const assets = await this.searchAssetsByMetadata({ tagIds: [tag.id] });
+                const tag = await this.getTagFromCache(pathInfo.itemName, false);
+                const assets = await this.getAssetsForTag(tag, true);
                 const nameByAssetId = this.getAssetDisplayNameByAssetId(assets, new Set<string>([TAG_METADATA_FILE_NAME]));
                 const files = assets.map((asset) => ({
                     name: nameByAssetId.get(asset.id) ?? asset.originalFileName,
@@ -335,7 +355,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 }
 
                 if (!pathInfo.itemName) {
-                    this.peopleCache = await this.fetchPeople();
+                    if (this.peopleCache.length === 0) {
+                        this.peopleCache = await this.fetchPeople();
+                    }
                     return this.peopleCache.map((person) => ({
                         name: person.displayName,
                         isDir: true,
@@ -344,8 +366,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     }));
                 }
 
-                const person = await this.getPersonFromCache(pathInfo.itemName, true);
-                const assets = await this.searchAssetsByMetadata({ personIds: [person.id] });
+                const person = await this.getPersonFromCache(pathInfo.itemName, false);
+                const assets = await this.getAssetsForPerson(person, true);
                 const nameByAssetId = this.getAssetDisplayNameByAssetId(assets, new Set<string>([PERSON_METADATA_FILE_NAME]));
                 const files = assets.map((asset) => ({
                     name: nameByAssetId.get(asset.id) ?? asset.originalFileName,
@@ -372,6 +394,12 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
     }
     async readFile(filename: string): Promise<tmp.FileResult> {
+        if (this.isRootConfigFilePath(filename)) {
+            const settingsFilePath = this.ensureCurrentUserSettingsFile();
+            const content = fs.readFileSync(settingsFilePath, 'utf8');
+            return this.tmpFileFromString(content);
+        }
+
         if (this.isAlbumMetadataFilePath(filename)) {
             const album = await this.getAlbumFromCache(filename, false);
             await this.fetchAssetsForAlbum(album);
@@ -384,12 +412,12 @@ export class ImmichFileSystem implements VirtualFileSystem {
             return this.tmpFileFromString(buildAlbumBrowserLinkForAlbum(album, this.baseUrl));
         }
 
-        const collectionMetadata = await this.getCollectionMetadataFileContentOrNull(filename, true);
+        const collectionMetadata = await this.getCollectionMetadataFileContentOrNull(filename, false);
         if (collectionMetadata != null) {
             return this.tmpFileFromString(collectionMetadata);
         }
 
-        const collectionAsset = await this.getCollectionAssetOrNull(filename, true);
+        const collectionAsset = await this.getCollectionAssetOrNull(filename, false);
         if (collectionAsset) {
             const endpoint = this.userScopedSettings.assetDownloadSource === 'preview'
                 ? `assets/${collectionAsset.id}/thumbnail`
@@ -434,6 +462,17 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return tmpFile;
     }
     async writeFile(filename: string, tmpFile: tmp.FileResult): Promise<void> {
+        if (this.isRootConfigFilePath(filename)) {
+            const content = fs.readFileSync(tmpFile.name, 'utf8');
+            tmpFile.removeCallback();
+            const userId = this.getCurrentUserId();
+            const mergedSettings = parseAndMergeUserSettingsContent(content, userId);
+            saveSettingsForUser(userId, mergedSettings);
+            this.userScopedSettings = mergedSettings;
+            this.collectionVisibilityCache = null;
+            return;
+        }
+
         if (await this.isReadOnlyCollectionPath(filename)) {
             tmpFile.removeCallback();
             throw new Error(`'${filename}' is read-only.`);
@@ -464,6 +503,15 @@ export class ImmichFileSystem implements VirtualFileSystem {
         this.uploadQueue.push({ filename, tmpFile });
     }
     async stat(filename: string): Promise<{ isDir: boolean; size: number; mtime: number; } | null> {
+        if (this.isRootConfigFilePath(filename)) {
+            const rootConfigFile = this.getRootConfigFileEntry();
+            return {
+                isDir: false,
+                size: rootConfigFile.size,
+                mtime: rootConfigFile.mtime,
+            };
+        }
+
         if (filename === '/') {
             return {
                 isDir: true,
@@ -483,7 +531,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
 
             if (!pathInfo.fileName) {
-                const tag = await this.getTagOrNullFromCache(pathInfo.itemName, true);
+                const tag = await this.getTagOrNullFromCache(pathInfo.itemName, false);
                 if (!tag) {
                     return null;
                 }
@@ -495,7 +543,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
 
             if (pathInfo.fileName === TAG_METADATA_FILE_NAME) {
-                const tag = await this.getTagOrNullFromCache(pathInfo.itemName, true);
+                const tag = await this.getTagOrNullFromCache(pathInfo.itemName, false);
                 if (!tag) {
                     return null;
                 }
@@ -507,7 +555,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 };
             }
 
-            const asset = await this.getCollectionAssetOrNull(filename, true);
+            const asset = await this.getCollectionAssetOrNull(filename, false);
             if (!asset) {
                 return null;
             }
@@ -529,7 +577,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
 
             if (!pathInfo.fileName) {
-                const person = await this.getPersonOrNullFromCache(pathInfo.itemName, true);
+                const person = await this.getPersonOrNullFromCache(pathInfo.itemName, false);
                 if (!person) {
                     return null;
                 }
@@ -541,7 +589,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
 
             if (pathInfo.fileName === PERSON_METADATA_FILE_NAME) {
-                const person = await this.getPersonOrNullFromCache(pathInfo.itemName, true);
+                const person = await this.getPersonOrNullFromCache(pathInfo.itemName, false);
                 if (!person) {
                     return null;
                 }
@@ -553,7 +601,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 };
             }
 
-            const asset = await this.getCollectionAssetOrNull(filename, true);
+            const asset = await this.getCollectionAssetOrNull(filename, false);
             if (!asset) {
                 return null;
             }
@@ -1111,7 +1159,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             if (!tag) {
                 return null;
             }
-            const assets = await this.searchAssetsByMetadata({ tagIds: [tag.id] });
+            const assets = await this.getAssetsForTag(tag, refreshCollectionAssets);
             return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets, new Set<string>([TAG_METADATA_FILE_NAME]));
         }
 
@@ -1127,7 +1175,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             if (!person) {
                 return null;
             }
-            const assets = await this.searchAssetsByMetadata({ personIds: [person.id] });
+            const assets = await this.getAssetsForPerson(person, refreshCollectionAssets);
             return this.getAssetFromAssetsByDisplayName(pathInfo.fileName, assets, new Set<string>([PERSON_METADATA_FILE_NAME]));
         }
 
@@ -1371,6 +1419,55 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return this.isAlbumMetadataFilePath(filePath) || this.isAlbumBrowserLinkFilePath(filePath);
     }
 
+    private isRootConfigFilePath(filePath: string): boolean {
+        const parts = this.getPathParts(filePath);
+        return parts.length === 1 && parts[0] === ROOT_CONFIG_FILE_NAME;
+    }
+
+    private getCurrentUserId(): string | undefined {
+        const userId = this.getTrimmedString(this.currentUser?.id);
+        return userId === '' ? undefined : userId;
+    }
+
+    private ensureCurrentUserSettingsFile(): string {
+        return ensureSettingsFileForUser(this.getCurrentUserId());
+    }
+
+    private getRootConfigFileEntry(): { name: string; isDir: boolean; size: number; mtime: number } {
+        const settingsFilePath = this.ensureCurrentUserSettingsFile();
+        const stats = fs.statSync(settingsFilePath);
+        return {
+            name: ROOT_CONFIG_FILE_NAME,
+            isDir: false,
+            size: stats.size,
+            mtime: Math.floor(stats.mtimeMs / 1000),
+        };
+    }
+
+    private getCollectionAssetCacheKey(kind: 'tag' | 'person', id: string): string {
+        return `${kind}:${id}`;
+    }
+
+    private async getAssetsForTag(tag: ImmichTag, refreshCache: boolean): Promise<ImmichAsset[]> {
+        const cacheKey = this.getCollectionAssetCacheKey('tag', tag.id);
+        if (!refreshCache && this.collectionAssetsCache.has(cacheKey)) {
+            return this.collectionAssetsCache.get(cacheKey) ?? [];
+        }
+        const assets = await this.searchAssetsByMetadata({ tagIds: [tag.id] });
+        this.collectionAssetsCache.set(cacheKey, assets);
+        return assets;
+    }
+
+    private async getAssetsForPerson(person: ImmichPerson, refreshCache: boolean): Promise<ImmichAsset[]> {
+        const cacheKey = this.getCollectionAssetCacheKey('person', person.id);
+        if (!refreshCache && this.collectionAssetsCache.has(cacheKey)) {
+            return this.collectionAssetsCache.get(cacheKey) ?? [];
+        }
+        const assets = await this.searchAssetsByMetadata({ personIds: [person.id] });
+        this.collectionAssetsCache.set(cacheKey, assets);
+        return assets;
+    }
+
     private tmpFileFromString(content: string): tmp.FileResult {
         const tempFile = tmp.fileSync();
         fs.writeFileSync(tempFile.name, content, 'utf8');
@@ -1405,8 +1502,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     private loadUserScopedSettings(): void {
-        const userId = this.getTrimmedString(this.currentUser?.id);
-        this.userScopedSettings = loadSettingsForUser(userId || undefined);
+        const userId = this.getCurrentUserId();
+        ensureSettingsFileForUser(userId);
+        this.userScopedSettings = loadSettingsForUser(userId);
+        this.collectionVisibilityCache = null;
     }
 
     // Remove trailing slashes from the Immich host URL

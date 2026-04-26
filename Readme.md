@@ -18,6 +18,7 @@ Root (`/`) exposes:
 - `/albums/` — albums you can access
 - `/tags/` — assets by tag (optional)
 - `/people/` — assets by recognized person (optional)
+- `config.yaml` — your user-specific network-storage settings file
 
 ### Album folders
 
@@ -85,7 +86,7 @@ services:
       FTP_PASSIVE_PORT_MIN: "30000"
       FTP_PASSIVE_PORT_MAX: "30010"
       LISTEN_HOST: "0.0.0.0"
-      SETTINGS_FILE: "/config/immich-network-storage.yaml"
+      SETTINGS_FILE: "/config/config.yaml"
     volumes:
       - ./immich-network-storage-config:/config
     restart: unless-stopped
@@ -107,11 +108,11 @@ services:
 | `ASSET_DOWNLOAD_SOURCE` | `original` | `original` or `preview` (`thumbnail` alias accepted). |
 | `ENABLE_TAGS_FOLDER_DEFAULT` | `true` | Fallback if user preference can’t be read. |
 | `ENABLE_PEOPLE_FOLDER_DEFAULT` | `true` | Fallback if user preference can’t be read. |
-| `SETTINGS_FILE` | `./immich-network-storage.yaml` | Optional YAML settings (supports `{userId}`). |
+| `SETTINGS_FILE` | `./config.yaml` | Settings file path used for persisted user config (`config.<userId>.yaml` for per-user files). |
 
 ### Optional YAML settings
 
-If `immich-network-storage.yaml` exists in the working directory:
+If `config.yaml` exists in the working directory:
 
 ```yaml
 asset:
@@ -124,7 +125,10 @@ virtualFolders:
     enabledDefault: true
 ```
 
-Env vars still take precedence. Per-user settings are supported via the Immich user ID (UUID) from `users/me`.
+Env vars still take precedence. Per-user settings are supported via the Immich user ID from `users/me`.
+On login, a per-user settings file is auto-created in storage (if missing) with merged defaults from environment/code, and is exposed as `/config.yaml` in SFTP/FTP/WebDAV.
+Runtime writes are user-scoped (`config.<userId>.yaml`) so no extra shared runtime settings file is created.
+Legacy `immich-network-storage.yaml` naming is no longer used by default.
 
 ## Connect / test
 
@@ -146,6 +150,26 @@ WebDAV:
 
 - URL: `http://your-server-hostname:19000`
 - Login: same as SFTP
+
+## Authentication details (Immich API)
+
+This service uses:
+
+- `x-api-key` header when logging in with `apikey` as username (password = API key)
+- `Authorization: Bearer <accessToken>` for email/password login sessions (`/api/auth/login` access token)
+
+For a **fully working read/write mount** (albums, assets, tags, people, metadata), use an API key with broad/full permissions.  
+You do **not** need a separate “session” permission when using API key mode.
+
+## WebDAV behind reverse proxy
+
+WebDAV uses normal HTTP methods (not WebSocket).  
+If your reverse proxy is currently tuned for WS upgrades, ensure the WebDAV route also:
+
+- forwards `Authorization` (for Basic auth between client and this service)
+- forwards standard WebDAV methods (`PROPFIND`, `PROPPATCH`, `MKCOL`, `MOVE`, `COPY`, `DELETE`, `PUT`, `OPTIONS`, `LOCK`, `UNLOCK`)
+- does not force WebSocket-only handling on the WebDAV path
+- preserves request bodies and destination headers
 
 ## Known limitations
 

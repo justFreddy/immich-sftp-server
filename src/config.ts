@@ -127,17 +127,63 @@ function buildPerUserSettingsFilePath(settingsFilePath: string, userId: string):
   return parsed.dir ? path.join(parsed.dir, fileName) : fileName;
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEFAULT_SETTINGS_FILE = './config.yaml';
+const UNSAFE_SCOPED_ID_CHARS = /[^a-zA-Z0-9._-]/g;
+
+function normalizeScopedUserId(userId?: string): string | undefined {
+  const normalized = userId?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.replace(UNSAFE_SCOPED_ID_CHARS, '_');
+}
+
+function getConfiguredSettingsFilePath(): string {
+  return getEnvOrDefault('SETTINGS_FILE', DEFAULT_SETTINGS_FILE);
+}
+
+function parseYamlSettingsObject(content: string, sourceLabel: string): Record<string, unknown> {
+  const parsed = YAML.parse(content);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid settings file '${sourceLabel}': expected a YAML object.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function getUserScopedSettingsTargetPath(settingsFilePath: string, userId?: string): string {
+  const normalizedUserId = normalizeScopedUserId(userId);
+  if (normalizedUserId) {
+    if (settingsFilePath.includes('{userId}')) {
+      return settingsFilePath.replace(/\{userId\}/g, normalizedUserId);
+    }
+    return buildPerUserSettingsFilePath(settingsFilePath, normalizedUserId);
+  }
+  return settingsFilePath;
+}
+
+function parseUserScopedSettingsOverrides(yamlSettings: Record<string, unknown>): Partial<UserScopedSettings> {
+  return {
+    assetFileNamePattern: parseAssetFileNamePattern(
+      getOptionalNestedString(yamlSettings, ['assetFileNamePattern']) ?? getOptionalNestedString(yamlSettings, ['asset', 'fileNamePattern']),
+      'settings file',
+    ),
+    assetDownloadSource: parseAssetDownloadSource(
+      getOptionalNestedString(yamlSettings, ['assetDownloadSource']) ?? getOptionalNestedString(yamlSettings, ['asset', 'downloadSource']),
+      'settings file',
+    ),
+    enableTagsFolderDefault: getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'tags', 'enabledDefault']),
+    enablePeopleFolderDefault: getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'people', 'enabledDefault']),
+  };
+}
 
 function resolveSettingsFilePath(userId?: string): string | undefined {
-  const settingsFilePath = getEnvOrDefault('SETTINGS_FILE', './immich-network-storage.yaml');
+  const settingsFilePath = getConfiguredSettingsFilePath();
   const candidates: string[] = [];
-  const normalizedUserId = userId?.trim();
-  if (normalizedUserId && UUID_PATTERN.test(normalizedUserId)) {
-    if (settingsFilePath.includes('{userId}')) {
-      candidates.push(settingsFilePath.replace(/\{userId\}/g, normalizedUserId));
-    }
-    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, normalizedUserId));
+  const normalizedUserId = normalizeScopedUserId(userId);
+  if (normalizedUserId) {
+    const scopedUserId = normalizedUserId;
+    candidates.push(getUserScopedSettingsTargetPath(settingsFilePath, scopedUserId));
+    candidates.push(buildPerUserSettingsFilePath(settingsFilePath, scopedUserId));
   }
   candidates.push(settingsFilePath);
 
@@ -156,27 +202,11 @@ function loadYamlSettingsFile(userId?: string): Record<string, unknown> {
   }
 
   const content = fs.readFileSync(settingsFilePath, 'utf8');
-  const parsed = YAML.parse(content);
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`Invalid settings file '${settingsFilePath}': expected a YAML object.`);
-  }
-  return parsed as Record<string, unknown>;
+  return parseYamlSettingsObject(content, settingsFilePath);
 }
 
 function readYamlSettingOverrides(userId?: string): Partial<UserScopedSettings> {
-  const yamlSettings = loadYamlSettingsFile(userId);
-  return {
-    assetFileNamePattern: parseAssetFileNamePattern(
-      getOptionalNestedString(yamlSettings, ['assetFileNamePattern']) ?? getOptionalNestedString(yamlSettings, ['asset', 'fileNamePattern']),
-      'settings file',
-    ),
-    assetDownloadSource: parseAssetDownloadSource(
-      getOptionalNestedString(yamlSettings, ['assetDownloadSource']) ?? getOptionalNestedString(yamlSettings, ['asset', 'downloadSource']),
-      'settings file',
-    ),
-    enableTagsFolderDefault: getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'tags', 'enabledDefault']),
-    enablePeopleFolderDefault: getOptionalNestedBoolean(yamlSettings, ['virtualFolders', 'people', 'enabledDefault']),
-  };
+  return parseUserScopedSettingsOverrides(loadYamlSettingsFile(userId));
 }
 
 export function loadSettingsForUser(userId?: string): UserScopedSettings {
@@ -187,6 +217,64 @@ export function loadSettingsForUser(userId?: string): UserScopedSettings {
     enableTagsFolderDefault: yamlOverrides.enableTagsFolderDefault ?? config.enableTagsFolderDefault,
     enablePeopleFolderDefault: yamlOverrides.enablePeopleFolderDefault ?? config.enablePeopleFolderDefault,
   };
+}
+
+function buildSettingsFileContent(settings: UserScopedSettings): string {
+  return YAML.stringify({
+    asset: {
+      fileNamePattern: settings.assetFileNamePattern,
+      downloadSource: settings.assetDownloadSource,
+    },
+    virtualFolders: {
+      tags: {
+        enabledDefault: settings.enableTagsFolderDefault,
+      },
+      people: {
+        enabledDefault: settings.enablePeopleFolderDefault,
+      },
+    },
+  });
+}
+
+export function getSettingsFilePathForUser(userId?: string): string {
+  return getUserScopedSettingsTargetPath(getConfiguredSettingsFilePath(), userId?.trim());
+}
+
+export function ensureSettingsFileForUser(userId?: string): string {
+  const targetPath = getSettingsFilePathForUser(userId);
+  if (fs.existsSync(targetPath)) {
+    return targetPath;
+  }
+
+  const initialSettings = loadSettingsForUser(userId);
+  const parentDir = path.dirname(targetPath);
+  if (parentDir && parentDir !== '.') {
+    fs.mkdirSync(parentDir, { recursive: true });
+  }
+  fs.writeFileSync(targetPath, buildSettingsFileContent(initialSettings), 'utf8');
+  return targetPath;
+}
+
+export function parseAndMergeUserSettingsContent(content: string, userId?: string): UserScopedSettings {
+  const parsed = parseYamlSettingsObject(content, 'uploaded settings content');
+  const overrides = parseUserScopedSettingsOverrides(parsed);
+  const current = loadSettingsForUser(userId);
+  return {
+    assetFileNamePattern: overrides.assetFileNamePattern ?? current.assetFileNamePattern,
+    assetDownloadSource: overrides.assetDownloadSource ?? current.assetDownloadSource,
+    enableTagsFolderDefault: overrides.enableTagsFolderDefault ?? current.enableTagsFolderDefault,
+    enablePeopleFolderDefault: overrides.enablePeopleFolderDefault ?? current.enablePeopleFolderDefault,
+  };
+}
+
+export function saveSettingsForUser(userId: string | undefined, settings: UserScopedSettings): string {
+  const targetPath = getSettingsFilePathForUser(userId);
+  const parentDir = path.dirname(targetPath);
+  if (parentDir && parentDir !== '.') {
+    fs.mkdirSync(parentDir, { recursive: true });
+  }
+  fs.writeFileSync(targetPath, buildSettingsFileContent(settings), 'utf8');
+  return targetPath;
 }
 
 function parseAssetFileNamePattern(value: string | undefined, source: string): AssetFileNamePattern | undefined {

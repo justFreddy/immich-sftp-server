@@ -142,6 +142,7 @@ async function startTransferServer(immichHost, sftpPort, ftpPort) {
       SFTP_PORT: String(sftpPort),
       FTP_PORT: String(ftpPort),
       LISTEN_HOST: '127.0.0.1',
+      SETTINGS_FILE: path.join('/tmp', `immich-ns-cli-login-${process.pid}.yaml`),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

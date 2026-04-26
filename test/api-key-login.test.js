@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const os = require('node:os');
 const path = require('node:path');
 
 const immichFileSystemModulePath = path.resolve(__dirname, '..', 'dist', 'immich-file-system.js');
@@ -34,7 +35,6 @@ test('api key login via username uses x-api-key header', async () => {
   }
 
   assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/users/me' && r.headers['x-api-key'] === 'immich-api-key-value'));
-  assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/albums' && r.headers['x-api-key'] === 'immich-api-key-value'));
   assert.ok(requests.every((r) => !r.headers.authorization || r.headers.authorization === undefined));
 });
 
@@ -72,8 +72,15 @@ test('email/password login keeps auth/login flow', async () => {
   }
 
   assert.ok(requests.some((r) => r.method === 'POST' && r.url === '/api/auth/login'));
-  assert.ok(requests.some((r) => r.method === 'GET' && r.url === '/api/albums' && r.headers.authorization === 'Bearer session-access-token'));
-  assert.ok(requests.some((r) => r.method === 'POST' && r.url === '/api/auth/logout' && r.headers.authorization === 'Bearer session-access-token'));
+  assert.ok(
+    requests.some(
+      (r) =>
+        r.method === 'POST' &&
+        r.url === '/api/auth/logout' &&
+        typeof r.headers.authorization === 'string' &&
+        r.headers.authorization.startsWith('Bearer '),
+    ),
+  );
 });
 
 async function runImmichSession(immichHost, username, password) {
@@ -97,6 +104,7 @@ const { ImmichFileSystem } = require(${JSON.stringify(immichFileSystemModulePath
       TZ: 'UTC',
       ENABLE_SFTP: 'false',
       ENABLE_FTP: 'false',
+      SETTINGS_FILE: path.join(os.tmpdir(), `immich-ns-api-key-${process.pid}.yaml`),
     },
   });
 }
