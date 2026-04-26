@@ -128,7 +128,7 @@ function buildPerUserSettingsFilePath(settingsFilePath: string, userId: string):
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DEFAULT_SETTINGS_FILE = './immich-network-storage.yaml';
+const DEFAULT_SETTINGS_FILE = './config.yaml';
 
 function isUuid(value?: string): value is string {
   return !!value && UUID_PATTERN.test(value);

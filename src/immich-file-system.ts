@@ -1524,7 +1524,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     'User-Agent': 'ImmichNetworkStorage (Linux)',
                     ...(this.authMode === 'api-key'
                         ? { 'x-api-key': this.immichAccessToken }
-                        : { 'Authorization': `Bearer ${this.immichAccessToken}` }),
+                        : {
+                            'x-immich-user-token': this.immichAccessToken,
+                            'x-immich-session-token': this.immichAccessToken,
+                        }),
                     ...(data instanceof FormData ? data.getHeaders?.() : { 'Content-Type': 'application/json' }),
                 },
                 data: data ?? undefined,

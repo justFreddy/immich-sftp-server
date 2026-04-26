@@ -64,7 +64,7 @@ process.stdout.write(String(ensureSettingsFileForUser(${JSON.stringify(userId)})
 test('asset settings can be read from root YAML file', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `asset:
+  fs.writeFileSync(path.join(tmpDir, 'config.yaml'), `asset:
   fileNamePattern: short_uuid
   downloadSource: preview
 `);
@@ -83,7 +83,7 @@ test('asset settings can be read from root YAML file', (t) => {
 test('environment variables override YAML asset settings', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `asset:
+  fs.writeFileSync(path.join(tmpDir, 'config.yaml'), `asset:
   fileNamePattern: original
   downloadSource: original
 `);
@@ -110,7 +110,7 @@ test('environment variables override YAML asset settings', (t) => {
 test('virtual folder defaults can be read from root YAML file', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `virtualFolders:
+  fs.writeFileSync(path.join(tmpDir, 'config.yaml'), `virtualFolders:
   tags:
     enabledDefault: false
   people:
@@ -131,7 +131,7 @@ test('virtual folder defaults can be read from root YAML file', (t) => {
 test('per-user YAML settings file overrides root settings for that user', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `asset:
+  fs.writeFileSync(path.join(tmpDir, 'config.yaml'), `asset:
   fileNamePattern: original
   downloadSource: original
 virtualFolders:
@@ -141,7 +141,7 @@ virtualFolders:
     enabledDefault: true
 `);
   // per-user settings file named by Immich user ID (UUID)
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.550e8400-e29b-41d4-a716-446655440000.yaml'), `asset:
+  fs.writeFileSync(path.join(tmpDir, 'config.550e8400-e29b-41d4-a716-446655440000.yaml'), `asset:
   fileNamePattern: short_uuid
   downloadSource: preview
 virtualFolders:
@@ -193,7 +193,7 @@ test('{userId} placeholder in SETTINGS_FILE resolves to per-user file', (t) => {
 test('ensureSettingsFileForUser creates per-user file with merged defaults', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `asset:
+  fs.writeFileSync(path.join(tmpDir, 'config.yaml'), `asset:
   fileNamePattern: date_uuid
 virtualFolders:
   tags:
@@ -205,7 +205,7 @@ virtualFolders:
   const userId = '550e8400-e29b-41d4-a716-446655440000';
   const settingsPath = ensureUserSettingsFile(userId, {}, tmpDir).trim();
   const resolvedSettingsPath = path.resolve(tmpDir, settingsPath);
-  assert.equal(resolvedSettingsPath, path.join(tmpDir, `immich-network-storage.${userId}.yaml`));
+  assert.equal(resolvedSettingsPath, path.join(tmpDir, `config.${userId}.yaml`));
   assert.equal(fs.existsSync(resolvedSettingsPath), true);
 
   const persisted = fs.readFileSync(resolvedSettingsPath, 'utf8');

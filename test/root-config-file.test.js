@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 test('root listing always exposes config.yaml and persists user settings file', async () => {
   const requests = [];
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-root-config-'));
-  const settingsFile = path.join(tmpDir, 'immich-network-storage.yaml');
+  const settingsFile = path.join(tmpDir, 'config.yaml');
   fs.writeFileSync(settingsFile, 'asset:\n  fileNamePattern: original\n', 'utf8');
 
   const server = await startMockServer((req, res, body) => {
@@ -40,7 +40,7 @@ test('root listing always exposes config.yaml and persists user settings file', 
     assert.ok(names.includes('albums'));
     assert.ok(names.includes('config.yaml'));
 
-    const perUserSettingsPath = path.join(tmpDir, 'immich-network-storage.550e8400-e29b-41d4-a716-446655440000.yaml');
+    const perUserSettingsPath = path.join(tmpDir, 'config.550e8400-e29b-41d4-a716-446655440000.yaml');
     assert.equal(fs.existsSync(perUserSettingsPath), true);
   } finally {
     await server.close();

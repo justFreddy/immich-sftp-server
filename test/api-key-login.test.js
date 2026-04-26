@@ -72,7 +72,16 @@ test('email/password login keeps auth/login flow', async () => {
   }
 
   assert.ok(requests.some((r) => r.method === 'POST' && r.url === '/api/auth/login'));
-  assert.ok(requests.some((r) => r.method === 'POST' && r.url === '/api/auth/logout' && r.headers.authorization === 'Bearer session-access-token'));
+  assert.ok(
+    requests.some(
+      (r) =>
+        r.method === 'POST' &&
+        r.url === '/api/auth/logout' &&
+        r.headers['x-immich-user-token'] === 'session-access-token' &&
+        r.headers['x-immich-session-token'] === 'session-access-token',
+    ),
+  );
+  assert.ok(requests.every((r) => !r.headers.authorization || r.headers.authorization === undefined));
 });
 
 async function runImmichSession(immichHost, username, password) {
