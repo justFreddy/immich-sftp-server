@@ -127,11 +127,15 @@ function buildPerUserSettingsFilePath(settingsFilePath: string, userId: string):
   return parsed.dir ? path.join(parsed.dir, fileName) : fileName;
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_SETTINGS_FILE = './config.yaml';
+const UNSAFE_SCOPED_ID_CHARS = /[^a-zA-Z0-9._-]/g;
 
-function isUuid(value?: string): value is string {
-  return !!value && UUID_PATTERN.test(value);
+function normalizeScopedUserId(userId?: string): string | undefined {
+  const normalized = userId?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.replace(UNSAFE_SCOPED_ID_CHARS, '_');
 }
 
 function getConfiguredSettingsFilePath(): string {
@@ -147,8 +151,8 @@ function parseYamlSettingsObject(content: string, sourceLabel: string): Record<s
 }
 
 function getUserScopedSettingsTargetPath(settingsFilePath: string, userId?: string): string {
-  const normalizedUserId = userId?.trim();
-  if (isUuid(normalizedUserId)) {
+  const normalizedUserId = normalizeScopedUserId(userId);
+  if (normalizedUserId) {
     if (settingsFilePath.includes('{userId}')) {
       return settingsFilePath.replace(/\{userId\}/g, normalizedUserId);
     }
@@ -175,8 +179,8 @@ function parseUserScopedSettingsOverrides(yamlSettings: Record<string, unknown>)
 function resolveSettingsFilePath(userId?: string): string | undefined {
   const settingsFilePath = getConfiguredSettingsFilePath();
   const candidates: string[] = [];
-  const normalizedUserId: string | undefined = userId?.trim();
-  if (isUuid(normalizedUserId)) {
+  const normalizedUserId = normalizeScopedUserId(userId);
+  if (normalizedUserId) {
     const scopedUserId = normalizedUserId;
     candidates.push(getUserScopedSettingsTargetPath(settingsFilePath, scopedUserId));
     candidates.push(buildPerUserSettingsFilePath(settingsFilePath, scopedUserId));

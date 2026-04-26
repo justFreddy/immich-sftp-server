@@ -167,12 +167,21 @@ virtualFolders:
     enablePeopleFolderDefault: true,
   });
 
-  // non-UUID value is ignored (security guard), falls back to global settings
+  // non-UUID user IDs are scoped as well, so each user can keep separate settings
+  fs.writeFileSync(path.join(tmpDir, 'config.not-a-uuid.yaml'), `asset:
+  fileNamePattern: date
+  downloadSource: preview
+virtualFolders:
+  tags:
+    enabledDefault: false
+  people:
+    enabledDefault: true
+`);
   const nonUuidSettings = readUserSettings('not-a-uuid', {}, tmpDir);
   assert.deepEqual(nonUuidSettings, {
-    assetFileNamePattern: 'original',
-    assetDownloadSource: 'original',
-    enableTagsFolderDefault: true,
+    assetFileNamePattern: 'date',
+    assetDownloadSource: 'preview',
+    enableTagsFolderDefault: false,
     enablePeopleFolderDefault: true,
   });
 });
@@ -220,4 +229,16 @@ virtualFolders:
     enableTagsFolderDefault: false,
     enablePeopleFolderDefault: true,
   });
+});
+
+test('ensureSettingsFileForUser scopes non-UUID users to their own file', (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  const userId = 'user-1';
+  const settingsPath = ensureUserSettingsFile(userId, {}, tmpDir).trim();
+  const resolvedSettingsPath = path.resolve(tmpDir, settingsPath);
+  assert.equal(resolvedSettingsPath, path.join(tmpDir, `config.${userId}.yaml`));
+  assert.equal(fs.existsSync(resolvedSettingsPath), true);
+  assert.equal(fs.existsSync(path.join(tmpDir, 'config.yaml')), false);
 });

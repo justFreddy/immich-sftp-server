@@ -125,8 +125,9 @@ virtualFolders:
     enabledDefault: true
 ```
 
-Env vars still take precedence. Per-user settings are supported via the Immich user ID (UUID) from `users/me`.
+Env vars still take precedence. Per-user settings are supported via the Immich user ID from `users/me`.
 On login, a per-user settings file is auto-created in storage (if missing) with merged defaults from environment/code, and is exposed as `/config.yaml` in SFTP/FTP/WebDAV.
+Runtime writes are user-scoped (`config.<userId>.yaml`) so no extra shared runtime settings file is created.
 Legacy `immich-network-storage.yaml` naming is no longer used by default.
 
 ## Connect / test
@@ -155,7 +156,7 @@ WebDAV:
 This service uses:
 
 - `x-api-key` header when logging in with `apikey` as username (password = API key)
-- `x-immich-user-token` and `x-immich-session-token` headers for session-token based requests (email/password login flow)
+- `Authorization: Bearer <accessToken>` for email/password login sessions (`/api/auth/login` access token)
 
 For a **fully working read/write mount** (albums, assets, tags, people, metadata), use an API key with broad/full permissions.  
 You do **not** need a separate “session” permission when using API key mode.
