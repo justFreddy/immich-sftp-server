@@ -1,0 +1,8 @@
+asset:
+  fileNamePattern: original
+  downloadSource: original
+virtualFolders:
+  tags:
+    enabledDefault: true
+  people:
+    enabledDefault: true

@@ -46,6 +46,21 @@ process.stdout.write(JSON.stringify(loadSettingsForUser(${JSON.stringify(userId)
   return JSON.parse(output);
 }
 
+function ensureUserSettingsFile(userId, extraEnv = {}, cwd = path.resolve(__dirname, '..')) {
+  const script = `
+const { ensureSettingsFileForUser } = require(${JSON.stringify(configModulePath)});
+process.stdout.write(String(ensureSettingsFileForUser(${JSON.stringify(userId)})));
+`;
+  return execFileSync(process.execPath, ['-e', script], {
+    cwd,
+    env: {
+      ...process.env,
+      IMMICH_HOST: 'http://immich.local',
+      ...extraEnv,
+    },
+  }).toString();
+}
+
 test('asset settings can be read from root YAML file', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
@@ -173,4 +188,36 @@ test('{userId} placeholder in SETTINGS_FILE resolves to per-user file', (t) => {
   const settingsFile = path.join(tmpDir, 'settings.{userId}.yaml');
   const userSettings = readUserSettings(userId, { SETTINGS_FILE: settingsFile }, tmpDir);
   assert.equal(userSettings.assetFileNamePattern, 'date');
+});
+
+test('ensureSettingsFileForUser creates per-user file with merged defaults', (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'immich-ns-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(tmpDir, 'immich-network-storage.yaml'), `asset:
+  fileNamePattern: date_uuid
+virtualFolders:
+  tags:
+    enabledDefault: false
+  people:
+    enabledDefault: true
+`);
+
+  const userId = '550e8400-e29b-41d4-a716-446655440000';
+  const settingsPath = ensureUserSettingsFile(userId, {}, tmpDir).trim();
+  const resolvedSettingsPath = path.resolve(tmpDir, settingsPath);
+  assert.equal(resolvedSettingsPath, path.join(tmpDir, `immich-network-storage.${userId}.yaml`));
+  assert.equal(fs.existsSync(resolvedSettingsPath), true);
+
+  const persisted = fs.readFileSync(resolvedSettingsPath, 'utf8');
+  assert.match(persisted, /fileNamePattern:\s*dateUuid/);
+  assert.match(persisted, /enabledDefault:\s*false/);
+  assert.match(persisted, /enabledDefault:\s*true/);
+
+  const settings = readUserSettings(userId, {}, tmpDir);
+  assert.deepEqual(settings, {
+    assetFileNamePattern: 'dateUuid',
+    assetDownloadSource: 'original',
+    enableTagsFolderDefault: false,
+    enablePeopleFolderDefault: true,
+  });
 });

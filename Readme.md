@@ -18,6 +18,7 @@ Root (`/`) exposes:
 - `/albums/` — albums you can access
 - `/tags/` — assets by tag (optional)
 - `/people/` — assets by recognized person (optional)
+- `config.yaml` — your user-specific network-storage settings file
 
 ### Album folders
 
@@ -125,6 +126,7 @@ virtualFolders:
 ```
 
 Env vars still take precedence. Per-user settings are supported via the Immich user ID (UUID) from `users/me`.
+On login, a per-user settings file is auto-created in storage (if missing) with merged defaults from environment/code, and is exposed as `/config.yaml` in SFTP/FTP/WebDAV.
 
 ## Connect / test
 
